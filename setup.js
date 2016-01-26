@@ -112,7 +112,7 @@ Simulation.prototype.check = function()
         print("simulation.relaxation has to be a number or an array.");
         return false;
     }
-    if( typeof this.density.value != "number" && !c(this.density.values, Array))
+    if( typeof this.density.value != "number" && !c(this.density.value, Array))
     {
         print("simulation.density.values has to be a number or an array");
         return false;
@@ -168,6 +168,7 @@ simulation.inhomogeneity.density    = 0;
 simulation.exchange                 = 0;
 simulation.relaxation               = 0;
 
+simulation.density.value            = 1;
 simulation.density.timeDependence   = function(time) {return 1;}
 
 

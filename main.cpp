@@ -394,18 +394,21 @@ void step(const DataPoint & dataPoint, Solution & solution, ThreadTools * tools)
     real dt = real(dataPoint.totalTime) / real(dataPoint.timeStepCount);
     real dt2 = dt*dt;
 
+    // Densiy factor (density at timestep t divided by density at t = 0)
+    real df = tools->densityFactor(t);
+
     if(dataPoint.damping != 0)
     {
          // Damping appears only as dt * damping or as damping * damping
-        real dtg =  dt * dataPoint.damping;
-        real g2 = dataPoint.damping * dataPoint.damping;
+        real dtg =  df * dt * dataPoint.damping;
+        real g2 = df * df * dataPoint.damping * dataPoint.damping;
 
         // x and y components of the total spin do not depend on the energy
-        real tsx = dataPoint.exchange * 0.5 * (3.0*solution.totalSpin_x - solution.totalSpin_x_old);
+        real tsx = df * dataPoint.exchange * 0.5 * (3.0*solution.totalSpin_x - solution.totalSpin_x_old);
         real tsx2 = tsx*tsx;
-        real tsy = dataPoint.exchange * 0.5 * (3.0*solution.totalSpin_y - solution.totalSpin_y_old);
+        real tsy = df * dataPoint.exchange * 0.5 * (3.0*solution.totalSpin_y - solution.totalSpin_y_old);
         real tsy2 = tsy*tsy;
-        real tmp_tsz = dataPoint.exchange * 0.5 * (3.0*solution.totalSpin_z - solution.totalSpin_z_old) + dataPoint.larmor;
+        real tmp_tsz = df * dataPoint.exchange * 0.5 * (3.0*solution.totalSpin_z - solution.totalSpin_z_old) + dataPoint.larmor;
 
         real tsxdtg = dtg * (3.0*solution.totalSpin_x - solution.totalSpin_x_old);
         real tsydtg = dtg * (3.0*solution.totalSpin_y - solution.totalSpin_y_old);
@@ -419,7 +422,7 @@ void step(const DataPoint & dataPoint, Solution & solution, ThreadTools * tools)
         for(int i = 0; i < tools->energyCount(); i++)
         {
             // For a harmonic trap, the larmor inhomogeneity is proprotional to the energy, while the density proportional to exp(-energy)
-            real tsz = tmp_tsz + dataPoint.larmorInhomogeneity*tools->energy(i) + dataPoint.densityInhomogeneity*exp(-tools->energy(i));
+            real tsz = tmp_tsz + dataPoint.larmorInhomogeneity*tools->energy(i) + df * dataPoint.densityInhomogeneity*exp(-tools->energy(i));
             real tsz2 = tsz*tsz;
 
             real dt2s2g2 = dt2*(tsx2 + tsy2 + tsz2 + g2);
@@ -461,17 +464,17 @@ void step(const DataPoint & dataPoint, Solution & solution, ThreadTools * tools)
         // Alias for convenience
 
         // x and y components of the total spin do not depend on the energy
-        real tsx = dataPoint.exchange * 0.5 * (3.0*solution.totalSpin_x - solution.totalSpin_x_old);
+        real tsx = df * dataPoint.exchange * 0.5 * (3.0*solution.totalSpin_x - solution.totalSpin_x_old);
         real tsx2 = tsx*tsx;
-        real tsy = dataPoint.exchange * 0.5 * (3.0*solution.totalSpin_y - solution.totalSpin_y_old);
+        real tsy = df * dataPoint.exchange * 0.5 * (3.0*solution.totalSpin_y - solution.totalSpin_y_old);
         real tsy2 = tsy*tsy;
-        real tmp_tsz = dataPoint.exchange * 0.5 * (3.0*solution.totalSpin_z - solution.totalSpin_z_old) + dataPoint.larmor;
+        real tmp_tsz = df * dataPoint.exchange * 0.5 * (3.0*solution.totalSpin_z - solution.totalSpin_z_old) + dataPoint.larmor;
 
         // Equation of motion for the individual spins
         for(int i = 0; i < tools->energyCount(); i++)
         {
             // Alias for convenience
-            real tsz = tmp_tsz + dataPoint.larmorInhomogeneity*tools->energy(i);
+            real tsz = tmp_tsz + dataPoint.larmorInhomogeneity*tools->energy(i) + df * dataPoint.densityInhomogeneity * exp(-tools->energy(i));
             real tsz2 = tsz*tsz;
 
             real det = 4.0 + dt2*(tsx2 + tsy2 + tsz2);
@@ -522,9 +525,7 @@ void step(const DataPoint & dataPoint, Solution & solution, ThreadTools * tools)
     solution.totalSpin_z /= tools->energyCount();
 
 
-    /* Saving the data
-     * not needed for spin echo as we are only interested in the final point
-     */
+    // Saving the data - not needed for spin echo as we are only interested in the final point
 
     if(!tools->spinEcho() && t % ((int)std::floor(dataPoint.timeStepCount/tools->timePointsCount())) == 0)
     {

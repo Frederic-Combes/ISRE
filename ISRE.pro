@@ -26,4 +26,7 @@ DISTFILES += \
     Default.js \
     Scripts/Simulation/SingleWell.js \
     Scripts/Gnuplot/FitRR0.gnuplot \
-    HowTo
+    HowTo \
+    SimulationPrototype.js \
+    setup.js \
+    Scripts/Simulation/FitRR0.js

@@ -124,6 +124,8 @@ bool processFile(QString filename, ThreadTools & tools)
         densityFactor[i] = engine.evaluate("simulation.density.timeDependence("+QString::number(timeInSeconds)+")").toNumber();
     }
 
+    tools.setDensityFactor(densityFactor);
+
     tools.setSimulationName(engine.evaluate("simulation.name").toString().left(255));
 
     /* Create the data queue */
@@ -157,9 +159,9 @@ bool processFile(QString filename, ThreadTools & tools)
 
                                 point.larmor                = *it1;
                                 point.larmorInhomogeneity   = *it2;
-                                point.densityInhomogeneity  = *it3;
-                                point.exchange              = *it4;
-                                point.damping               = *it5;
+                                point.densityInhomogeneity  = *it3 * *it6;
+                                point.exchange              = *it4 * *it6;
+                                point.damping               = *it5 * *it6;
 
                                 /* Inserts the simuation into the database */
                                 query.prepare("INSERT INTO simulation"
@@ -221,51 +223,54 @@ bool processFile(QString filename, ThreadTools & tools)
                     {
                         for(auto it5 = r.begin(); it5 != r.end(); it5++)
                         {
-                            DataPoint point;
-
-                            point.totalTime             = tools.totalTime();
-                            point.timeStepCount         = tools.timeStepsCount();
-
-                            point.larmor                = *it1;
-                            point.larmorInhomogeneity   = *it2;
-                            point.densityInhomogeneity  = *it3;
-                            point.exchange              = *it4;
-                            point.damping               = *it5;
-
-                            /* Inserts the simuation into the database */
-                            query.prepare("INSERT INTO simulation"
-                                          " (spin_echo, larmor_frequency, larmor_inhomogeneity, density_inhomogeneity, exchange_frequency, damping_rate, name)"
-                                          " VALUES (0, :l, :i, :d, :e, :r, :n);");
-                            query.bindValue(":l", point.larmor);
-                            query.bindValue(":i", point.larmorInhomogeneity);
-                            query.bindValue(":d", point.densityInhomogeneity);
-                            query.bindValue(":e", point.exchange);
-                            query.bindValue(":r", point.damping);
-                            query.bindValue(":n", tools.simulationName());
-
-                            query.exec();
-
-                            /* Obtains the simulation id */
-                            point.simulationId = query.lastInsertId().toInt();
-
-                            /* Inserts the energy bins into the database */
-                            point.energyBinId = vector<int>();
-                            point.energyBinId.resize(tools.energyBinCount());
-                            for(int i = 0; i < tools.energyBinCount(); i++)
+                            for(auto it6 = d.begin(); it6 != d.end(); it6++)
                             {
-                                query.prepare("INSERT INTO energy_bin (simulation_id, energy_min, energy_max) VALUES (:s, :a, :b);");
-                                query.bindValue(":s", point.simulationId);
-                                query.bindValue(":a", tools.energyBin(i).first);
-                                query.bindValue(":b", tools.energyBin(i).second);
+                                DataPoint point;
+
+                                point.totalTime             = tools.totalTime();
+                                point.timeStepCount         = tools.timeStepsCount();
+
+                                point.larmor                = *it1;
+                                point.larmorInhomogeneity   = *it2;
+                                point.densityInhomogeneity  = *it3 * *it6;
+                                point.exchange              = *it4 * *it6;
+                                point.damping               = *it5 * *it6;
+
+                                /* Inserts the simuation into the database */
+                                query.prepare("INSERT INTO simulation"
+                                              " (spin_echo, larmor_frequency, larmor_inhomogeneity, density_inhomogeneity, exchange_frequency, damping_rate, name)"
+                                              " VALUES (0, :l, :i, :d, :e, :r, :n);");
+                                query.bindValue(":l", point.larmor);
+                                query.bindValue(":i", point.larmorInhomogeneity);
+                                query.bindValue(":d", point.densityInhomogeneity);
+                                query.bindValue(":e", point.exchange);
+                                query.bindValue(":r", point.damping);
+                                query.bindValue(":n", tools.simulationName());
 
                                 query.exec();
 
-                                /* Obtains the energy bin id */
-                                point.energyBinId.at(i) = query.lastInsertId().toInt();
-                            }
+                                /* Obtains the simulation id */
+                                point.simulationId = query.lastInsertId().toInt();
 
-                            /* Adds the point to the queue */
-                            tools.queue().push(point);
+                                /* Inserts the energy bins into the database */
+                                point.energyBinId = vector<int>();
+                                point.energyBinId.resize(tools.energyBinCount());
+                                for(int i = 0; i < tools.energyBinCount(); i++)
+                                {
+                                    query.prepare("INSERT INTO energy_bin (simulation_id, energy_min, energy_max) VALUES (:s, :a, :b);");
+                                    query.bindValue(":s", point.simulationId);
+                                    query.bindValue(":a", tools.energyBin(i).first);
+                                    query.bindValue(":b", tools.energyBin(i).second);
+
+                                    query.exec();
+
+                                    /* Obtains the energy bin id */
+                                    point.energyBinId.at(i) = query.lastInsertId().toInt();
+                                }
+
+                                /* Adds the point to the queue */
+                                tools.queue().push(point);
+                            }
                         }
                     }
                 }
