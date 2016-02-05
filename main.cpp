@@ -196,13 +196,13 @@ void threadLoop(ThreadTools * tools)
 
         if(timeStep < 1e-6)
             qDebug() << "Warning: the time step is close to or below numerical precision 1e-7 (" << timeStep << ")";
-        if(timeStep*dataPoint.larmor > 1e-1)
+        if(abs(timeStep*dataPoint.larmor) > 1e-1)
             qDebug() << "Warning: time step * larmor frequency is close to or higher than 1 (" << timeStep*dataPoint.larmor << ")";
-        if(timeStep*dataPoint.larmorInhomogeneity*tools->energy(tools->energyCount()-1) > 1e-1)
+        if(abs(timeStep*dataPoint.larmorInhomogeneity*tools->energy(tools->energyCount()-1)) > 1e-1)
             qDebug() << "Warning: time step * larmo inh. * max. energy  is close to or higher than 1 (" << timeStep*dataPoint.larmorInhomogeneity*tools->energy(tools->energyCount()-1) << ")";
-        if(dataPoint.larmorInhomogeneity != 0 && timeStep*dataPoint.larmorInhomogeneity*tools->energy(1) < 1e-14)
+        if(dataPoint.larmorInhomogeneity != 0 && abs(timeStep*dataPoint.larmorInhomogeneity*tools->energy(1)) < 1e-14)
             qDebug() << "Warning: larmor inh. * min. energy is close to or below numerical precision 1e-15 (" << timeStep*dataPoint.larmorInhomogeneity*tools->energy(1) << ")";
-        if(timeStep*dataPoint.exchange > 1e-1)
+        if(abs(timeStep*dataPoint.exchange) > 1e-1)
             qDebug() << "Warning: timestep * exchange frequency is to close to or higher than 1 (" << timeStep*dataPoint.exchange << ")";
 
         /* Numerical solution */
@@ -399,7 +399,7 @@ void step(const DataPoint & dataPoint, Solution & solution, ThreadTools * tools)
 
     if(dataPoint.damping != 0)
     {
-         // Damping appears only as dt * damping or as damping * damping
+        // Damping appears only as dt * damping or as damping * damping
         real dtg =  df * dt * dataPoint.damping;
         real g2 = df * df * dataPoint.damping * dataPoint.damping;
 

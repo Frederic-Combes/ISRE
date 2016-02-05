@@ -33,7 +33,7 @@ Simulation.prototype.check = function()
 
     if( typeof this.time.length != "number" || this.time.length <= 0 )
     {
-        print("simulation.time.lenght must be a positive number.");
+        print("simulation.time.length must be a positive number.");
         return false;
     }
     if( typeof this.time.steps != "number" || this.time.steps < 1 )
@@ -169,7 +169,8 @@ simulation.exchange                 = 0;
 simulation.relaxation               = 0;
 
 simulation.density.value            = 1;
-simulation.density.timeDependence   = function(time) {return 1;}
+simulation.density.lifetime         = Infinity;
+simulation.density.timeDependence   = function (time) {return Math.exp(-time/this.lifetime)};
 
 
 
