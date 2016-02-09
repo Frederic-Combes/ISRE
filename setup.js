@@ -2,7 +2,7 @@ function Simulation() {
     this.dimension       = undefined;
     this.time            = {length:2,steps:2000,points:100};
     this.energy          = {count:1000, bins: []};
-    this.spinEcho        = {enabled:false, time:[0.25,0.75]};
+    this.spinEcho        = {enabled:false, time:[]};
     this.frequency       = {larmor:0,exchange:0};
     this.inhomogeneity   = {larmor:0,density:0};
     this.relaxation      = 0;
@@ -157,6 +157,9 @@ simulation.dimension    = 1;
 simulation.time.length  = 2;
 simulation.time.steps   = 2000;
 simulation.time.points  = 100;
+
+simulation.spinEcho.enabled = false;
+simulation.spinEcho.time = [];
 
 simulation.energy.count = 1000;
 simulation.energy.bins  = [];

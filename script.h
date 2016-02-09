@@ -11,7 +11,7 @@ class QScriptEngine;
 
 typedef std::queue<DataPoint> DataQueue;
 
-bool processFile(QString filename, ThreadTools & tools);
+bool processFile(QString filename, SimulationTools & tools);
 
 std::vector<double> makeList(QScriptEngine * engine, QString pName);
 

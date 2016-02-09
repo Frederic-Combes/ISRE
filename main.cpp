@@ -26,43 +26,39 @@ const double PI = M_PI;
 
 using namespace std;
 
-// Reads the run settings from a file
-//bool readRunSettings(QString filename, RunSettings & runSettings);
-
 // Thread loop for multithreading
-void threadLoop(ThreadTools *tools);
+void threadLoop(SimulationTools * tools);
 
 // Initial conditions to allow step-by-step solving
-void initialize(const DataPoint & dataPoint, Solution & solution, ThreadTools * tools);
+void initialize(const DataPoint & dataPoint, Solution & solution, SimulationTools * tools);
 
 // Performs a time step
-void step(const DataPoint & dataPoint, Solution & solution, ThreadTools * tools);
+void step(const DataPoint & dataPoint, Solution & solution, SimulationTools * tools);
 
 // Realizes a spin echo
-void spinEcho(Solution & solution, ThreadTools * tools);
+void spinEcho(Solution & solution, SimulationTools * tools);
 
 // Compute the phase of the spin
-void computePhase(const ThreadTools & tools);
+void computePhase(const SimulationTools & tools);
 
 int main(int argc, char * argv[])
 {
     auto startTime = chrono::high_resolution_clock::now();
 
-    /* Necessary to use QScriptEngine and QSqlDatabase */
+    // Necessary to use QScriptEngine and QSqlDatabase
     QCoreApplication app(argc, argv);
 
-    ThreadTools tools;
+    // Wrapper for various simulation settings
+    SimulationTools tools;
 
-    /* Reading the settings of the simulation, exit if the settings are invalid or if the file is not found */
-
+    // Reading the settings of the simulation, exit if the settings are invalid or if the file is not found
     if(argc < 2 || !processFile(QString(argv[1]), tools))
     {
         qDebug() << "No script provided.";
         return -1;
     }
 
-    /* Preparing & starting the threads */
-
+    // Preparing & starting the threads
     unsigned int threadCount = thread::hardware_concurrency()-1;
 
     qDebug() << tools.queue().size() << "points to evaluate. Preparing the threads...";
@@ -81,8 +77,7 @@ int main(int argc, char * argv[])
 
     threadLoop(&tools);
 
-    /* Waiting for all thread to complete */
-
+    // Waiting for all thread to complete
     for(unsigned int i = 0; i < threadCount; i++)
     {
         if(threadPool[i])
@@ -92,6 +87,7 @@ int main(int argc, char * argv[])
         }
     }
 
+    // Compute the phase of the spin
     computePhase(tools);
 
     auto endTime = chrono::high_resolution_clock::now();
@@ -101,11 +97,11 @@ int main(int argc, char * argv[])
     return 0;
 }
 
-void threadLoop(ThreadTools * tools)
+void threadLoop(SimulationTools * tools)
 {
     DataPoint   dataPoint;
 
-    /* Memory pre allocation for the solution */
+    // Memory pre-allocation for the solution
     Solution    solution;
 
     solution.spin_x             = new real[tools->energyCount()];
@@ -127,11 +123,7 @@ void threadLoop(ThreadTools * tools)
         solution.partialSpin_z_save[i] = new real[tools->timePointsCount()+1];
     }
 
-    double * norm       = new double[tools->energyBinCount()+1];
-    double * norm_old   = new double[tools->energyBinCount()+1];
-    double * phase      = new double[tools->energyBinCount()+1];
-
-    /* Database */
+    // Database
     QSqlDatabase db = QSqlDatabase::cloneDatabase(tools->database(), "isre-result-" + QString::number(hash<thread::id>()(this_thread::get_id())));
     if(!db.open())
     {
@@ -139,20 +131,21 @@ void threadLoop(ThreadTools * tools)
     }
 
     QSqlQuery query(db);
-    /* Energy bin rowids */
+    // Energy bin rowids
     int * energy_bin_id  = new int[tools->energyBinCount()];
 
+    // Main loop
     while(true)
     {
-        /* Obtaining the data to process */
+        // Obtaining the data to process
         tools->queueMutex()->lock();
 
         if(tools->queue().empty())
         {
-            /* All data has been processed */
+            // All data has been processed.
             tools->queueMutex()->unlock();
 
-            /* Cleaning */
+            // Cleaning
             delete [] solution.spin_x;
             delete [] solution.spin_y;
             delete [] solution.spin_z;
@@ -172,18 +165,14 @@ void threadLoop(ThreadTools * tools)
             delete [] solution.partialSpin_y_save;
             delete [] solution.partialSpin_z_save;
 
-            delete [] norm;
-            delete [] norm_old;
-            delete [] phase;
-
             delete [] energy_bin_id;
 
-            /* Exiting */
+            // Exiting
             return;
         }
         else
         {
-            /* Pops a point from the queue */
+            // Pops a point from the queue
             dataPoint = tools->queue().front();
             tools->queue().pop();
 
@@ -191,7 +180,7 @@ void threadLoop(ThreadTools * tools)
 
         tools->queueMutex()->unlock();
 
-        /* Checking numerical value */
+        // Checking numerical value
         real timeStep = real(dataPoint.totalTime) / real(dataPoint.timeStepCount);
 
         if(timeStep < 1e-6)
@@ -205,138 +194,126 @@ void threadLoop(ThreadTools * tools)
         if(abs(timeStep*dataPoint.exchange) > 1e-1)
             qDebug() << "Warning: timestep * exchange frequency is to close to or higher than 1 (" << timeStep*dataPoint.exchange << ")";
 
-        /* Numerical solution */
+        // Numerical solution
 
         initialize(dataPoint, solution, tools);
 
         for(int i = 0; i < tools->spinEchoCount(); i++)
         {
-            /* Free evolution until the next spin echo */
+            // Gets the next spin echo time step
+            int spinEchoTimeStep;
 
-            int spinEchoTimeStep = tools->spinEchoTimeStep(i) * dataPoint.timeStepCount / tools->timeStepsCount();
+            // If tools->spinEcho(), spin echo times are reltaive to the simulation time
+            if(tools->spinEcho())
+                spinEchoTimeStep = tools->spinEchoTimeStep(i) * dataPoint.timeStepCount / tools->timeStepsCount();
+            // if not, then the spin echo times are absolute
+            else
+                spinEchoTimeStep = tools->spinEchoTimeStep(i);
 
-            /* The starting time step is not 0 due to the initialization */
+            // Free evolution until the next spin echo
             for(int t = solution.timeStep; t < spinEchoTimeStep && t <= dataPoint.timeStepCount; t++)
                 step(dataPoint, solution, tools);
 
+            // Performs the spin echo
             spinEcho(solution, tools);
         }
 
-        /* Free evolution until the end */
+        // Free evolution until the end
 
         for(int t = solution.timeStep; t <= dataPoint.timeStepCount; t++)
             step(dataPoint, solution, tools);
 
-        /* Saving data */
 
-        tools->fileMutex()->lock();
-
-        /* Starting the SQL transaction */
-        query.clear();
-        query.exec("BEGIN");
-
+        // When using spin echo we are interested in only one point, hence we didn't save anything in solution.*Spin_*_save;
         if(tools->spinEcho())
         {
-            /* Total Spin */
+            solution.totalSpin_x_save[0] = solution.totalSpin_x;
+            solution.totalSpin_y_save[0] = solution.totalSpin_y;
+            solution.totalSpin_z_save[0] = solution.totalSpin_z;
 
-            double norm = sqrt(pow(solution.totalSpin_x, 2.0) + pow(solution.totalSpin_y, 2.0) + pow(solution.totalSpin_z, 2.0));
-
-            query.prepare("INSERT INTO result (simulation_id, time, s_x, s_y, s_z, contrast) VALUES (:s, :t, :x, :y, :z, :c);");
-            query.bindValue(":s", dataPoint.simulationId);
-            query.bindValue(":t", dataPoint.totalTime);
-            query.bindValue(":x", solution.totalSpin_x);
-            query.bindValue(":y", solution.totalSpin_y);
-            query.bindValue(":z", solution.totalSpin_z);
-            query.bindValue(":c", norm);
-
-            query.exec();
-
-            /* Partial spin */
-
-            for(int i = 0; i < tools->energyBinCount(); i++)
+            for(int i = 0; i < tools->energyBinCount(); ++i)
             {
-                double partial_spin_x = 0, partial_spin_y = 0, partial_spin_z = 0;
+                solution.partialSpin_x_save[i][0] = 0;
+                solution.partialSpin_y_save[i][0] = 0;
+                solution.partialSpin_z_save[i][0] = 0;
 
                 int j = 0;
 
                 while(tools->energy(j) < tools->energyBin(i).first)
-                    j++;
+                    ++j;
                 while(tools->energy(j) < tools->energyBin(i).second)
                 {
-                    partial_spin_x += solution.spin_x[j];
-                    partial_spin_y += solution.spin_y[j];
-                    partial_spin_z += solution.spin_z[j];
-                    j++;
+                    solution.partialSpin_x_save[j][0] += solution.spin_x[j];
+                    solution.partialSpin_y_save[j][0] += solution.spin_y[j];
+                    solution.partialSpin_z_save[j][0] += solution.spin_z[j];
+                    ++j;
                 }
+            }
+        }
 
-                norm = sqrt(pow(partial_spin_x, 2.0) + pow(partial_spin_y, 2.0) + pow(partial_spin_z, 2.0));
+        // Saving data
+        tools->databaseMutex()->lock();
+
+        // Starting the SQL transaction
+        query.clear();
+        query.exec("BEGIN");
+
+        // In case of spin echo we compute the solution point by point, while whithout it we compute all points at once
+        int t_min = 0;
+        int t_max = tools->spinEcho() ? 0 : tools->timePointsCount();
+
+        for(int t = t_min; t <= t_max; ++t)
+        {
+            // Time we are svaing the values for
+            double time = tools->spinEcho() ? dataPoint.totalTime : t * dataPoint.totalTime / tools->timePointsCount();
+
+            // Total Spin
+            double norm = sqrt(pow(solution.totalSpin_x_save[t], 2.0) + pow(solution.totalSpin_y_save[t], 2.0) + pow(solution.totalSpin_z_save[t], 2.0));
+
+            query.prepare("INSERT INTO result (simulation_id, time, s_x, s_y, s_z, contrast) VALUES (:s, :t, :x, :y, :z, :c);");
+            query.bindValue(":s", dataPoint.simulationId);
+            query.bindValue(":t", time);
+            query.bindValue(":x", solution.totalSpin_x_save[t]);
+            query.bindValue(":y", solution.totalSpin_y_save[t]);
+            query.bindValue(":z", solution.totalSpin_z_save[t]);
+            query.bindValue(":c", norm);
+
+            query.exec();
+
+            // Partial spin
+            for(int i = 0; i < tools->energyBinCount(); ++i)
+            {
+                norm = sqrt(pow(solution.partialSpin_x_save[i][t], 2.0) + pow(solution.partialSpin_y_save[i][t], 2.0) + pow(solution.partialSpin_z_save[i][t], 2.0));
 
                 query.prepare("INSERT INTO energy_bin_result (energy_bin_id, time, s_x, s_y, s_z, contrast) VALUES (:i, :t, :x, :y, :z, :c);");
                 query.bindValue(":i", dataPoint.energyBinId.at(i));
-                query.bindValue(":t", dataPoint.totalTime);
-                query.bindValue(":x", partial_spin_x);
-                query.bindValue(":y", partial_spin_y);
-                query.bindValue(":z", partial_spin_z);
+                query.bindValue(":t", time);
+                query.bindValue(":x", solution.partialSpin_x_save[i][t]);
+                query.bindValue(":y", solution.partialSpin_y_save[i][t]);
+                query.bindValue(":z", solution.partialSpin_z_save[i][t]);
                 query.bindValue(":c", norm);
 
                 query.exec();
             }
         }
-        else
-        {
-            double step = dataPoint.totalTime/tools->timePointsCount();
-            for(int t = 0; t <= tools->timePointsCount(); t++)
-            {
-                /* Total Spin */
 
-                double norm = sqrt(pow(solution.totalSpin_x_save[t], 2.0) + pow(solution.totalSpin_y_save[t], 2.0) + pow(solution.totalSpin_z_save[t], 2.0));
-
-                query.prepare("INSERT INTO result (simulation_id, time, s_x, s_y, s_z, contrast) VALUES (:s, :t, :x, :y, :z, :c);");
-                query.bindValue(":s", dataPoint.simulationId);
-                query.bindValue(":t", t*step);
-                query.bindValue(":x", solution.totalSpin_x_save[t]);
-                query.bindValue(":y", solution.totalSpin_y_save[t]);
-                query.bindValue(":z", solution.totalSpin_z_save[t]);
-                query.bindValue(":c", norm);
-
-                query.exec();
-
-                /* Partial spin */
-
-                for(int i = 0; i < tools->energyBinCount(); i++)
-                {
-                    norm = sqrt(pow(solution.partialSpin_x_save[i][t], 2.0) + pow(solution.partialSpin_y_save[i][t], 2.0) + pow(solution.partialSpin_z_save[i][t], 2.0));
-
-                    query.prepare("INSERT INTO energy_bin_result (energy_bin_id, time, s_x, s_y, s_z, contrast) VALUES (:i, :t, :x, :y, :z, :c);");
-                    query.bindValue(":i", dataPoint.energyBinId.at(i));
-                    query.bindValue(":t", t*step);
-                    query.bindValue(":x", solution.partialSpin_x_save[i][t]);
-                    query.bindValue(":y", solution.partialSpin_y_save[i][t]);
-                    query.bindValue(":z", solution.partialSpin_z_save[i][t]);
-                    query.bindValue(":c", norm);
-
-                    query.exec();
-                }
-            }
-        }
-
-        /* Commit all the SQL data */
+        // Commit all the SQL data
         query.exec("COMMIT");
         query.clear();
 
-        tools->fileMutex()->unlock();
+        tools->databaseMutex()->unlock();
     }
 }
 
 // Initialize the first and second time step of the solution, as the computing the solution at time t requires to know the solution at time t-1 and t-2
-void initialize(const DataPoint & dataPoint, Solution & solution, ThreadTools * tools)
+void initialize(const DataPoint & dataPoint, Solution & solution, SimulationTools * tools)
 {
     solution.timeStep = 2;
 
-    /* Duration of the time steps in seconds */
+    // Duration of the time steps in seconds
     real timeStep = real(dataPoint.totalTime) / real(dataPoint.timeStepCount);
 
-    /* Clearing all previous values */
+    // Clearing all previous values
     memset(solution.totalSpin_x_save, 0, (tools->timePointsCount()+1)*sizeof(real));
     memset(solution.totalSpin_y_save, 0, (tools->timePointsCount()+1)*sizeof(real));
     memset(solution.totalSpin_z_save, 0, (tools->timePointsCount()+1)*sizeof(real));
@@ -348,8 +325,7 @@ void initialize(const DataPoint & dataPoint, Solution & solution, ThreadTools * 
         memset(solution.partialSpin_x_save[i], 0, (tools->timePointsCount()+1)*sizeof(real));
     }
 
-    /* Values at the initial time */
-
+    // Values at the initial time
     solution.totalSpin_x_old = real(1.0);
     solution.totalSpin_y_old = 0;
     solution.totalSpin_z_old = 0;
@@ -365,8 +341,7 @@ void initialize(const DataPoint & dataPoint, Solution & solution, ThreadTools * 
         solution.partialSpin_z_save[i][0] = 0;
     }
 
-    /* Values at the first time step */
-
+    // Values at the first time step
     for(int i = 0; i < tools->energyCount(); i++)
     {
         real norm = sqrt(1.0 + pow(timeStep *(dataPoint.larmor + dataPoint.larmorInhomogeneity * tools->energy(i)), 2.0));
@@ -386,7 +361,7 @@ void initialize(const DataPoint & dataPoint, Solution & solution, ThreadTools * 
 }
 
 // Given the solution of the equation up to the time step solution.timestep - 1, computes the solution at the sime step solution.timestep and increases timestep by one
-void step(const DataPoint & dataPoint, Solution & solution, ThreadTools * tools)
+void step(const DataPoint & dataPoint, Solution & solution, SimulationTools * tools)
 {
     int t = solution.timeStep;
 
@@ -501,13 +476,13 @@ void step(const DataPoint & dataPoint, Solution & solution, ThreadTools * tools)
         }
     }
 
-    /* Value of the total spin at the previous time step */
+    // Value of the total spin at the previous time step
 
     solution.totalSpin_x_old = solution.totalSpin_x;
     solution.totalSpin_y_old = solution.totalSpin_y;
     solution.totalSpin_z_old = solution.totalSpin_z;
 
-    /* Value of the total spin at the current time step */
+    // Value of the total spin at the current time step
 
     solution.totalSpin_x = 0;
     solution.totalSpin_y = 0;
@@ -558,9 +533,9 @@ void step(const DataPoint & dataPoint, Solution & solution, ThreadTools * tools)
 }
 
 // Applies a spin echo (pi pulse) around the y-axis at the latest timestep (at solution.timestep-1). solution.timestep is not increased.
-void spinEcho(Solution & solution, ThreadTools * tools)
+void spinEcho(Solution & solution, SimulationTools * tools)
 {
-    /* Pi pulse around the y-axis sends Sx to -Sx and Sz to -Sz */
+    // Pi pulse around the y-axis sends Sx to -Sx and Sz to -Sz
 
     for(int i = 0; i < tools->energyCount(); i++)
     {
@@ -575,7 +550,7 @@ void spinEcho(Solution & solution, ThreadTools * tools)
     solution.totalSpin_z_old = -solution.totalSpin_z_old;
 }
 
-void computePhase(const ThreadTools & tools)
+void computePhase(const SimulationTools & tools)
 {
     QSqlQuery query(tools.database());
     query.exec("BEGIN");

@@ -13,9 +13,9 @@
 
 using namespace std;
 
-bool processFile(QString filename, ThreadTools & tools)
+bool processFile(QString filename, SimulationTools &tools)
 {
-    /* Opening "setup.js" to load default values */
+    // Opening "setup.js" to load default values
 
     QFile setupFile("setup.js");
 
@@ -25,7 +25,7 @@ bool processFile(QString filename, ThreadTools & tools)
         return false;
     }
 
-    /* Opening the file defining this simulation parameters */
+    // Opening the file defining this simulation parameters
 
     QFile simulationFile(filename);
 
@@ -35,7 +35,7 @@ bool processFile(QString filename, ThreadTools & tools)
         return false;
     }
 
-    /* Processing both files */
+    // Processing both files
 
     QScriptEngine engine;
 
@@ -81,13 +81,13 @@ bool processFile(QString filename, ThreadTools & tools)
         return false;
     }
 
-    /* Check that all value are valid */
+    // Check that all values are valid and turns single values to arrays
     if(!engine.evaluate("simulation.check()").toBool())
     {
         return false;
     }
 
-    /* Get the values */
+    // Get the values
 
     tools.setSpaceDimension(engine.evaluate("simulation.dimension").toInteger());
     tools.setTotalTime(engine.evaluate("simulation.time.length").toNumber());
@@ -95,6 +95,7 @@ bool processFile(QString filename, ThreadTools & tools)
     tools.setTimePointsCount(engine.evaluate("simulation.time.points").toInteger());
     tools.setEnergyCount(engine.evaluate("simulation.energy.count").toInteger());
 
+    // Reads the energy bins
     {
         QString pName = "energy.bins";
         int length = engine.evaluate("simulation."+pName+".length").toNumber();
@@ -110,12 +111,12 @@ bool processFile(QString filename, ThreadTools & tools)
         }
     }
 
-    tools.enableSpinEcho(engine.evaluate("simulation.spinEcho.enabled").toBool());
+    // Spin echo setup
 
-    if(tools.spinEcho())
-    {
-        tools.setSpinEchoTime(makeList(&engine, QString("spinEcho.time")));
-    }
+    tools.enableSpinEcho(engine.evaluate("simulation.spinEcho.enabled").toBool());
+    tools.setSpinEchoTime(makeList(&engine, QString("spinEcho.time")));
+
+    // Time-dependence of the density
 
     double * densityFactor = new double[tools.timeStepsCount()];
     for(int i = 0; i < tools.timeStepsCount(); i++)
@@ -126,9 +127,11 @@ bool processFile(QString filename, ThreadTools & tools)
 
     tools.setDensityFactor(densityFactor);
 
+    // Simulation name
+
     tools.setSimulationName(engine.evaluate("simulation.name").toString().left(255));
 
-    /* Create the data queue */
+    // Create the data queue
 
     vector<double> fl = makeList(&engine, QString("frequency.larmor"));
     vector<double> fe = makeList(&engine, QString("frequency.exchange"));
@@ -163,7 +166,7 @@ bool processFile(QString filename, ThreadTools & tools)
                                 point.exchange              = *it4 * *it6;
                                 point.damping               = *it5 * *it6;
 
-                                /* Inserts the simuation into the database */
+                                // Inserts the simuation into the database
                                 query.prepare("INSERT INTO simulation"
                                               " (spin_echo, larmor_frequency, larmor_inhomogeneity, density_inhomogeneity, exchange_frequency, damping_rate, name)"
                                               " VALUES (1, :l, :i, :d, :e, :r, :n);");
@@ -176,10 +179,10 @@ bool processFile(QString filename, ThreadTools & tools)
 
                                 query.exec();
 
-                                /* Obtains the simulation id */
+                                // Obtains the simulation id
                                 point.simulationId = query.lastInsertId().toInt();
 
-                                /* Inserts the energy bins into the database */
+                                // Inserts the energy bins into the database
                                 point.energyBinId = vector<int>();
                                 point.energyBinId.resize(tools.energyBinCount());
                                 for(int i = 0; i < tools.energyBinCount(); i++)
@@ -191,7 +194,7 @@ bool processFile(QString filename, ThreadTools & tools)
 
                                     query.exec();
 
-                                    /* Obtains the energy bin id */
+                                    // Obtains the energy bin id
                                     point.energyBinId[i] = query.lastInsertId().toInt();
                                 }
 
@@ -200,7 +203,7 @@ bool processFile(QString filename, ThreadTools & tools)
                                     point.totalTime             = tools.totalTime() * ((double)i) / ((double)tools.timePointsCount());
                                     point.timeStepCount         = tools.timeStepsCount() * ((double)i) / ((double)tools.timePointsCount());
 
-                                    /* Adds the point to the queue */
+                                    // Adds the point to the queue
                                     tools.queue().push(point);
                                 }
                             }
@@ -236,7 +239,7 @@ bool processFile(QString filename, ThreadTools & tools)
                                 point.exchange              = *it4 * *it6;
                                 point.damping               = *it5 * *it6;
 
-                                /* Inserts the simuation into the database */
+                                // Inserts the simuation into the database
                                 query.prepare("INSERT INTO simulation"
                                               " (spin_echo, larmor_frequency, larmor_inhomogeneity, density_inhomogeneity, exchange_frequency, damping_rate, name)"
                                               " VALUES (0, :l, :i, :d, :e, :r, :n);");
@@ -249,10 +252,10 @@ bool processFile(QString filename, ThreadTools & tools)
 
                                 query.exec();
 
-                                /* Obtains the simulation id */
+                                // Obtains the simulation id
                                 point.simulationId = query.lastInsertId().toInt();
 
-                                /* Inserts the energy bins into the database */
+                                // Inserts the energy bins into the database
                                 point.energyBinId = vector<int>();
                                 point.energyBinId.resize(tools.energyBinCount());
                                 for(int i = 0; i < tools.energyBinCount(); i++)
@@ -264,11 +267,11 @@ bool processFile(QString filename, ThreadTools & tools)
 
                                     query.exec();
 
-                                    /* Obtains the energy bin id */
+                                    // Obtains the energy bin id
                                     point.energyBinId.at(i) = query.lastInsertId().toInt();
                                 }
 
-                                /* Adds the point to the queue */
+                                // Adds the point to the queue
                                 tools.queue().push(point);
                             }
                         }
@@ -280,7 +283,7 @@ bool processFile(QString filename, ThreadTools & tools)
 
     query.exec("COMMIT");
 
-    /* Initialize the tools object */
+    // Initialize the tools object
 
     tools.init();
 

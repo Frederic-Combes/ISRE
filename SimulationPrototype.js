@@ -7,8 +7,13 @@ simulation.time.points  = 100;                                              // N
 simulation.energy.count = 1000;                                             // Number of energy samples                                         // Must be a single value                                                   // Defaults to 1000
 simulation.energy.bins  = [[0,Math.log(2)],[Math.log(2),Infinity]];         // Energy bins                                                      // Must be an array of the form [[bin1min,bin2max],[bin2min,bin2max],...]   // Defaults to [] (no energy bining)
 
-simulation.spinEcho.enabled = true;                                         // Spin echo                                                        // Must be true of false                                                    // Defaults to false (no spin echo)
-simulation.spinEcho.time    = [0.25,0.75];                                  // Spin echo time as a fraction of the simulation time              // Must be a value or a list of values between 0 and 1                      // Defaults to [0.25,0.75] (Spin echo happening at 1/4 and 3/4 of the simulation time)
+simulation.spinEcho.enabled = true;                                         // Spin echo                                                        // Must be true of false                                                     // Defaults to false (no relative spin echo)
+simulation.spinEcho.time    = [0.25,0.75];                                  // Spin echo times                                                  // Must be a value or a list of values (between 0 and 1 if enabled = true)   // Defaults to [] (no spin echo happening at any fixed times)
+
+// Explanation : with spinEcho.time = [0.25,0.75] and spinEcho.enabled = true, when measuring at time t, the
+// spin echoes are realised at time 0.25 * t and 0.75 * t, while if spinEcho.enabled = false then when measuring
+// at time t, the spin echoes are realised at time 0.25s and 0.75s
+// when spinEcho.time = [], no spin echo are realised whatsoever
 
 simulation.frequency.larmor         = 0;                                    // Larmor frequency in rad / s.                                     // Can be a single value or a list      // Defaults to 0
 simulation.frequency.exchange       = 1;                                    // Exchange frequency in rad / s                                    // Can be a single value or a list      // Defaults to 0
