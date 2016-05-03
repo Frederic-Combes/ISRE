@@ -14,11 +14,20 @@ CONFIG   -= app_bundle
 
 TEMPLATE = app
 
+OBJECTS_DIR = .build/
 
-SOURCES += main.cpp tools.cpp \
+# Using Eigen
+INCLUDEPATH += /home/fred/Documents/Numerique
+
+SOURCES +=			\
+	main.cpp		\
+	tools.cpp		\
     script.cpp
-HEADERS += tools.h \
+HEADERS +=			\
+	tools.h			\
     script.h
+RESOURCES += \
+	resources.qrc
 
 QTPLUGIN += qsqlmysql
 
@@ -29,4 +38,6 @@ DISTFILES += \
     HowTo \
     SimulationPrototype.js \
     setup.js \
-    Scripts/Simulation/FitRR0.js
+    Scripts/Simulation/FitRR0.js \
+    Scripts/Simulation/Test.js
+
