@@ -1,17 +1,29 @@
 #include "script.h"
+#include "simulation.h"
+#include "simulationresult.h"
+#include "compute.h"
+#include "strings.h"
 
+// Multithreading
+#include <thread>
+#include <mutex>
+#include <chrono>
+
+// File support
 #include <QFile>
 #include <QTextStream>
 
+// Script support
 #include <QScriptEngine>
 #include <QScriptValue>
+#include "scriptobjects.h"
 
+// Database support
+#include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QSqlError>
 
 #include <QDebug>
-
-#include <boost/math/special_functions/bessel.hpp>
 
 // Linear algebra
 #pragma GCC diagnostic push
@@ -23,335 +35,338 @@
 #pragma GCC diagnostic pop
 
 using namespace std;
+using namespace Eigen;
+using namespace ScriptObject;
 
-// Computes the bessel function of the second kind I_0(arg)
-QScriptValue besselI_0(QScriptContext *context, QScriptEngine *engine)
+/*************************************************************************************************************
+ * Class CompiledFunction
+ ************************************************************************************************************/
+
+/*************************************************************************************************************
+ * Constructors
+ ************************************************************************************************************/
+
+CompiledFunction::CompiledFunction(const QString & name, unsigned int index, const QString & code)
+    : p_name(name), p_code(code), p_index(index), p_dependencyBuilt(false), p_valid(true), p_flag(0)
 {
-    if(context->argumentCount() != 1)
-        return QScriptValue(QScriptValue::UndefinedValue);
+     QRegExp regexp(QString("\\b") + p_name + QString("\\b"));
 
-    if(!context->argument(0).isNumber())
-        return QScriptValue(QScriptValue::UndefinedValue);
-
-    return QScriptValue(engine, boost::math::cyl_bessel_i(0.0, context->argument(0).toNumber()));
+     if(regexp.indexIn(p_code) != -1) {
+         p_valid = false;
+         qDebug() << "CompiledFunction: Function depends on itself!";
+     }
 }
 
-QScriptValue loadScript(QScriptContext *context, QScriptEngine * engine)
+/*************************************************************************************************************
+ * Public Members
+ ************************************************************************************************************/
+
+bool CompiledFunction::buildDependency(const vector<Parameter> & parameters, const vector<CompiledFunction *> & functions)
 {
+    if(p_dependencyBuilt || !p_valid) {
+        return p_valid;
+    }
+
+    p_dependencyBuilt = true;
+
+    for(const Parameter & parameter : parameters) {
+        QRegExp regexp(QString("\\b") + parameter.name + QString("\\b"));
+
+        if(regexp.indexIn(p_code) != -1) {
+            p_dependencies.insert(parameter.name);
+        }
+    }
+
+    for(CompiledFunction * function : functions) {
+        QRegExp regexp(QString("\\b") + function->name() + QString("\\b"));
+
+        if(regexp.indexIn(p_code) != -1) {
+            function->buildDependency(parameters, functions);
+            p_dependencies.insert(function->name());
+
+            for(QString name : function->p_dependencies) {
+                p_dependencies.insert(name);
+            }
+        }
+    }
+
+    if(p_dependencies.find(p_name) != p_dependencies.end()) {
+        p_valid = false;
+        qDebug() << "CompiledFunction::buildDependency : Function depends on itself!";
+    }
+
+    return p_valid;
+}
+
+bool CompiledFunction::compile(const mathpresso::Context & context)
+{
+    if(!p_valid) {
+        return false;
+    }
+
+    mathpresso::Error error = p_compiledCode.compile(context, p_code.toUtf8().data(), mathpresso::kNoOptions);
+
+    if(error != mathpresso::kErrorOk) {
+        qDebug() << "CompiledFunction::compile : Error" << error;
+        return false;
+    }
+
+    return true;
+}
+
+bool CompiledFunction::dependsOn(const QString & name) const
+{
+    if(!p_dependencyBuilt) {
+        qDebug() << "CompiledFunction::dependsOn : called before buildDependency()";
+        return true;
+    }
+
+    return p_dependencies.find(name) != p_dependencies.end();
+}
+
+/*************************************************************************************************************
+ * Class ScriptLoader
+ ************************************************************************************************************/
+
+/*************************************************************************************************************
+ * Static Members
+ ************************************************************************************************************/
+
+QScriptValue ScriptLoader::scriptFunctionLoadScript(QScriptContext * context, QScriptEngine *)
+{
+    // Check the argument count
     if(context->argumentCount() != 1) {
-        qDebug() << "No argument given to loadScript()";
+        qDebug() << "ScriptLoader::scriptFunction:loadScript: expecting exactly one argument.";
         return QScriptValue::UndefinedValue;
     }
 
+    // Check the argument type
     if(!context->argument(0).isString()) {
-        qDebug() << "Invalid argument given to loadScript()";
+        qDebug() << "ScriptLoader::scriptFunction:loadScript: argument is not a string";
         return QScriptValue::UndefinedValue;
     }
 
-    QFile scriptFile(context->argument(0).toString());
-    if(!scriptFile.open(QIODevice::ReadOnly)) {
-        qDebug() << "Failed to open the file" << context->argument(0).toString();
+    // Locate the corresponding file
+    QString filename = context->argument(0).toString();
+
+    QFile file(filename);
+
+    if(!file.open(QIODevice::ReadOnly)) {
+        qDebug() << "ScriptLoader::scriptFunction:loadScript: failed to open the file" << filename.toUtf8().data();
         return QScriptValue::UndefinedValue;
+
     }
 
-    QTextStream scriptStream(&scriptFile);
-    QString script = scriptStream.readAll();
-
-    QScriptSyntaxCheckResult syntaxCheck = engine->checkSyntax(script);
-
-    if(syntaxCheck.state() != QScriptSyntaxCheckResult::Valid) {
-        qDebug() << "Syntax check for script" << context->argument(0).toString() << "failed";
-        qDebug() << "Line" << syntaxCheck.errorLineNumber() << ": error :" << syntaxCheck.errorMessage();
-        return QScriptValue::UndefinedValue;
-    }
-
-    engine->evaluate(script);
-
-    if(engine->hasUncaughtException())
-    {
-        qDebug() << "Uncaught exception within the script" << context->argument(0).toString();
-        qDebug() << "Line" << engine->uncaughtExceptionLineNumber() << ": error :" << engine->uncaughtException().toString();
-        qDebug() << "Backtrace :" << engine->uncaughtExceptionBacktrace();
+    // Load the script
+    if(!ScriptLoader::load(QTextStream(&file).readAll())) {
+        qDebug() << "ScriptLoader::scriptFunction:loadScript: failed to load the script";
     }
 
     return QScriptValue::UndefinedValue;
 }
 
-Eigen::Matrix3d toMatrix3d(const QScriptValue & value)
+QScriptValue ScriptLoader::scriptFunctionSimulationConstructor(QScriptContext * context, QScriptEngine * engine)
 {
-    Eigen::Matrix3d matrix;
+    using namespace Strings::Script;
 
-    matrix << value.property(0).property(0).toNumber(), value.property(0).property(1).toNumber(), value.property(0).property(2).toNumber(),
-              value.property(1).property(0).toNumber(), value.property(1).property(1).toNumber(), value.property(1).property(2).toNumber(),
-              value.property(2).property(0).toNumber(), value.property(2).property(1).toNumber(), value.property(2).property(2).toNumber();
+    QScriptValue thisObject;
 
-    qDebug() << "Matrix :";
-    qDebug() << matrix(0,0) << matrix(0,1) << matrix(0,2) << endl
-             << matrix(1,0) << matrix(1,1) << matrix(1,2) << endl
-             << matrix(2,0) << matrix(2,1) << matrix(2,2);
+    if(context->isCalledAsConstructor()) {
+        thisObject = context->thisObject();
+    } else {
+        thisObject = engine->newObject();
+        thisObject.setPrototype(context->callee().prototype());
+    }
 
-    return matrix;
+    // Bind C++ function to Simulation.run
+    thisObject.setProperty(Simulation::Run, engine->newFunction(ScriptLoader::scriptFunctionSimulationRun));
+
+    // Default values
+    thisObject.setProperty(Simulation::Frequency, QScriptValue(engine, "0"));
+    thisObject.setProperty(Simulation::Exchange, QScriptValue(engine, "0"));
+    thisObject.setProperty(Simulation::Damping, QScriptValue(engine, "0"));
+
+    QScriptValue atomLoss = engine->newObject();
+    atomLoss.setProperty(AtomLoss::FromF1, QScriptValue(engine, "0"));
+    atomLoss.setProperty(AtomLoss::FromF2, QScriptValue(engine, "0"));
+    thisObject.setProperty(Simulation::AtomLoss, atomLoss);
+
+    QScriptValue intialSpin = engine->newArray();
+    intialSpin.setProperty(0, QScriptValue(engine, "1"));
+    intialSpin.setProperty(1, QScriptValue(engine, "0"));
+    intialSpin.setProperty(2, QScriptValue(engine, "0"));
+    thisObject.setProperty(Simulation::InitialSpin, intialSpin);
+
+    thisObject.setProperty(Simulation::Operations, engine->newArray());
+    thisObject.setProperty(Simulation::Name, engine->undefinedValue());
+
+    return thisObject;
 }
 
-bool processFile(QString filename, SimulationTools &tools)
+QScriptValue ScriptLoader::scriptFunctionSimulationRun(QScriptContext * context, QScriptEngine * engine)
 {
-    // Opening "setup.js" to load default values
+    namespace StrScr = Strings::Script;
 
-    QFile setupFile(":/Setup/setup.js");
+    // Check the argument count
+    if(context->argumentCount() > 0) {
+        qDebug() << "ScriptLoader:Simulation.run called with an incorrect parameter count:" << context->argumentCount() << ", expected no argument.";
+        return QScriptValue::UndefinedValue;
+    }
 
-    if(!setupFile.open(QIODevice::ReadOnly))
+    // TODO: Check the arguments type
+
+    // TODO: Check the simulation validity
+
+    QScriptValue sim = context->thisObject();
+
+    Simulation simulation;
+
+    simulation.setName(sim.property(StrScr::Simulation::Name).toString());
+
+    simulation.setCode(Index::Frequency,        sim.property(StrScr::Simulation::Frequency).toString());
+    simulation.setCode(Index::Exchange,         sim.property(StrScr::Simulation::Exchange).toString());
+    simulation.setCode(Index::Damping,          sim.property(StrScr::Simulation::Damping).toString());
+    simulation.setCode(Index::AtomLossFromF1,   sim.property(StrScr::Simulation::AtomLoss).property(StrScr::AtomLoss::FromF1).toString());
+    simulation.setCode(Index::AtomLossFromF2,   sim.property(StrScr::Simulation::AtomLoss).property(StrScr::AtomLoss::FromF2).toString());
+    simulation.setCode(Index::InitialSpinX,     sim.property(StrScr::Simulation::InitialSpin).property(0).toString());
+    simulation.setCode(Index::InitialSpinY,     sim.property(StrScr::Simulation::InitialSpin).property(1).toString());
+    simulation.setCode(Index::InitialSpinZ,     sim.property(StrScr::Simulation::InitialSpin).property(2).toString());
+
+    SimulationContext simulationContext;
+
+    simulationContext.setSettings(ScriptObject::Settings::fromScriptValue(sim.property(StrScr::Simulation::Settings)));
+    simulationContext.setSimulation(simulation);
+
+    for(quint32 i = 0; i < sim.property(StrScr::Simulation::Parameters).property("length").toUInt32(); ++i) {
+        simulationContext.addParameter(ScriptObject::Parameter::fromScriptValue(sim.property(StrScr::Simulation::Parameters).property(i)));
+    }
+
+    for(quint32 i = 0; i < sim.property(StrScr::Simulation::Functions).property("length").toUInt32(); ++i) {
+        simulationContext.addFunction(ScriptObject::Function::fromScriptValue(sim.property(StrScr::Simulation::Functions).property(i)));
+    }
+
+    for(quint32 j = 0; j < sim.property(StrScr::Simulation::Operations).property("length").toUInt32(); ++j) {
+        simulationContext.addOperation(ScriptObject::Operation::fromScriptValue(sim.property(StrScr::Simulation::Operations).property(j)));
+    }
+
+
+    try {
+        simulationContext.prepare();
+    } catch(...) {
+        qDebug() << "ScriptLoader::scriptFunction:Simulation.run: simulation is invalid";
+        return engine->undefinedValue();
+    }
+
+    qDebug() << "ScriptLoader::scriptFunction:Simulation.run: starting simulation";
+    auto startTime = chrono::high_resolution_clock::now();
+
+    unsigned int threadCount = thread::hardware_concurrency()-1;
+    thread * threadPool[threadCount == 0 ? 1 : threadCount];
+
+    for(thread * & t : threadPool) {
+        t = new thread(threadLoop, ref(simulationContext));
+    }
+
+    threadLoop(simulationContext);
+
+    for(thread * & t : threadPool) {
+        t->join();
+        delete t;
+    }
+
+    simulationContext.end();
+
+    auto endTime = chrono::high_resolution_clock::now();
+    qDebug() << "ScriptLoader::scriptFunction:Simulation.run: simulation ended succesfully ("
+             << chrono::duration_cast<chrono::milliseconds>(endTime - startTime).count() << "ms)";
+
+    QScriptValue returnValue = engine->newObject();
+
+    // Adds the function to the script object
+    returnValue.setProperty("select",    engine->newFunction(SimulationResult::scriptFunctionTableSelect));
+    returnValue.setProperty("mergeWith", engine->newFunction(SimulationResult::scriptFunctionTableMergeWith));
+    returnValue.setProperty("joinWith",  engine->newFunction(SimulationResult::scriptFunctionTableJoinWith));
+    returnValue.setProperty("order",     engine->newFunction(SimulationResult::scriptFunctionTableOrder));
+    returnValue.setProperty("list",      engine->newFunction(SimulationResult::scriptFunctionTableList));
+    returnValue.setProperty("write",     engine->newFunction(SimulationResult::scriptFunctionTableWrite));
+    returnValue.setProperty("erase",     engine->newFunction(SimulationResult::scriptFunctionTableErase));
+
+    returnValue.setData(engine->newVariant(QVariant::fromValue(SimulationResultPtr::create(simulationContext.ids()))));
+
+    return returnValue;
+}
+
+/*************************************************************************************************************
+ * Constructors
+ ************************************************************************************************************/
+
+QScriptEngine * ScriptLoader::p_engine = NULL;
+
+/*************************************************************************************************************
+ * Public Members
+ ************************************************************************************************************/
+
+void ScriptLoader::init()
+{
+    if(p_engine == NULL) {
+        p_engine = new QScriptEngine();
+
+        // Add additional functions to the script environment
+        p_engine->globalObject().setProperty("loadScript",  p_engine->newFunction(ScriptLoader::scriptFunctionLoadScript));
+        p_engine->globalObject().setProperty("Simulation",  p_engine->newFunction(ScriptLoader::scriptFunctionSimulationConstructor));
+        p_engine->globalObject().setProperty("Table",       p_engine->newFunction(SimulationResult::scriptFunctionTableConstructor));
+
+        // Load the setup file
+        QFile setupFile(":/Setup/setup.js");
+        setupFile.open(QIODevice::ReadOnly);
+
+        QString setupScript = QTextStream(&setupFile).readAll();
+
+        performSyntaxCheck(setupScript);
+        evaluate(setupScript);
+    }
+}
+
+bool ScriptLoader::load(QString script)
+{
+    if(performSyntaxCheck(script) && evaluate(script)) {
+        return true;
+    }
+
+    return false;
+}
+
+/*************************************************************************************************************
+ * Private Members
+ ************************************************************************************************************/
+
+bool ScriptLoader::performSyntaxCheck(const QString & script)
+{
+    QScriptSyntaxCheckResult syntaxCheck = p_engine->checkSyntax(script);
+
+    if(syntaxCheck.state() != QScriptSyntaxCheckResult::Valid)
     {
-        qWarning() << "The setup simulation file ""setup.js"" could not be opened.";
+        qDebug() << "ScriptLoader::load: Syntax error in the script";
+        qDebug() << "Line" << syntaxCheck.errorLineNumber() << ": error:" << syntaxCheck.errorMessage();
         return false;
     }
-
-    // Opening the file defining this simulation parameters
-
-    QFile simulationFile(filename);
-
-    if(!simulationFile.open(QIODevice::ReadOnly))
-    {
-        qWarning() << "The file" << filename << "could not be open.";
-        return false;
-    }
-
-    // Processing both files
-
-    QScriptEngine engine;
-
-    // Provide acces to specific functions
-
-    // Script loading
-    QScriptValue loadScriptFunction = engine.newFunction(loadScript, 1);
-    engine.globalObject().setProperty("loadScript", loadScriptFunction);
-
-    // Bessel I_0 function
-    QScriptValue besselI_0Function = engine.newFunction(besselI_0, 1);
-    engine.globalObject().setProperty("besselI_0", besselI_0Function);
-
-    // Syntax checking for the setup file
-
-    QTextStream setupStream(&setupFile);
-    QString setup = setupStream.readAll();
-    QScriptSyntaxCheckResult setupSyntaxCheck = engine.checkSyntax(setup);
-
-    if(setupSyntaxCheck.state() != QScriptSyntaxCheckResult::Valid)
-    {
-        qDebug() << "Line" << setupSyntaxCheck.errorLineNumber() << ": error:" << setupSyntaxCheck.errorMessage();
-        return false;
-    }
-
-    // Processing the setup file
-
-    engine.evaluate(setup);
-
-    if(engine.hasUncaughtException())
-    {
-        qDebug() << "Uncaught exception within the file ""setup.js""";
-        qDebug() << engine.uncaughtException().toString();
-        qDebug() << "Line" << engine.uncaughtExceptionLineNumber();
-        qDebug() << engine.uncaughtExceptionBacktrace();
-        return false;
-    }
-
-    // Syntax checking for the simulation file
-
-    QTextStream simulationStream(&simulationFile);
-    QString simulation = simulationStream.readAll();
-    QScriptSyntaxCheckResult simulationSyntaxCheck = engine.checkSyntax(simulation);
-
-    if(simulationSyntaxCheck.state() != QScriptSyntaxCheckResult::Valid) {
-        qDebug() << "Line" << simulationSyntaxCheck.errorLineNumber() << ": Syntax error:" << simulationSyntaxCheck.errorMessage();
-        return false;
-    }
-
-    // Processing
-
-    engine.evaluate(simulation);
-
-    if(engine.hasUncaughtException()) {
-        qDebug() << "Uncaught exception within the file" << filename;
-        qDebug() << engine.uncaughtException().toString();
-        qDebug() << "Line" << engine.uncaughtExceptionLineNumber();
-        qDebug() << engine.uncaughtExceptionBacktrace();
-        return false;
-    }
-
-    QScriptValue simulationObject = engine.evaluate("simulation");
-
-    // Check that all values are valid and turns single values to arrays
-    if(!simulationObject.property("check").call(simulationObject).toBool()) {
-        return false;
-    }
-
-    // Space dimension and energy sampling
-    tools.sampleEnergy(simulationObject.property("dimension").toInteger(), simulationObject.property("energy").property("count").toInteger());
-
-    // Time settings
-    {
-        QScriptValue timeSettings = simulationObject.property("time");
-        tools.setTotalTime(timeSettings.property("length").toNumber());
-        tools.setTimeStepsCount(timeSettings.property("steps").toInteger());
-        tools.setTimePointsCount(timeSettings.property("points").toInteger());
-    }
-
-    // Reads the energy bins
-    {
-        QScriptValue energyBinSettings = simulationObject.property("energy").property("bins");
-        int length = energyBinSettings.property("length").toNumber();
-        for(int i = 0; i < length; ++i) {
-            tools.addEnergyBin(energyBinSettings.property(i).property(0).toNumber(),
-                               energyBinSettings.property(i).property(1).toNumber());
-        }
-    }
-
-    // Adding operations (pi-pulses, ...)
-    {
-        qDebug() << "Adding operations...";
-        QScriptValue operations = engine.evaluate("simulation.operations");
-        int length = operations.property("length").toInteger();
-        for(int i = 0; i < length; ++i) {
-            QScriptValue scriptOperation = operations.property(i);
-
-            Operation operation;
-            operation.isFixedTime       = scriptOperation.property("isFixedTime").toNumber();
-            operation.time              = scriptOperation.property("time").toNumber();
-            operation.operationMatrix   = toMatrix3d(scriptOperation.property("operator"));
-
-            if(abs(abs(operation.operationMatrix.determinant()) - 1.0) > 1e-6) {
-                qDebug() << "The operation determinant is neither 1 nor -1! (" << operation.operationMatrix.determinant() << ")";
-            }
-
-            tools.addOperation(operation);
-        }
-    }
-
-    // Time-dependence of the density
-    vector<double> & densityTimeDependence = tools.densityTimeDependance();
-    densityTimeDependence.resize(tools.timeStepsCount()+1);
-
-    for(int i = 0; i <= tools.timeStepsCount(); ++i) {
-        double timeInSeconds = double(i) / double(tools.timeStepsCount()) * tools.totalTime();
-        densityTimeDependence[i] = engine.evaluate(QString("simulation.density.timeDependence(")+QString::number(timeInSeconds)+QString(")")).toNumber();
-    }
-
-    // Energy dependence of the density
-    vector<double> & densityEnergyDependence = tools.densityEnergyDependance();
-    densityEnergyDependence.resize(tools.energyCount());
-    for(int i = 0; i < tools.energyCount(); ++i) {
-        densityEnergyDependence[i] = engine.evaluate(QString("simulation.density.energyDependence(") + QString::number(tools.energy(i)) + QString(")")).toNumber();
-    }
-
-    // Simulation name
-    tools.setSimulationName(simulationObject.property("name").toString().left(255));
-
-    // Create the data queue
-    vector<double> fl = makeList(&engine, "frequency.larmor");
-    vector<double> il = makeList(&engine, "inhomogeneity.larmor");
-    vector<double> id = makeList(&engine, "inhomogeneity.density");
-    vector<double> fe = makeList(&engine, "frequency.exchange");
-    vector<double> r  = makeList(&engine, "relaxation");
-    vector<double> d  = makeList(&engine, "density.value");
-    vector<double> l1 = makeList(&engine, "atomLoss.fromF1");
-    vector<double> l2 = makeList(&engine, "atomLoss.fromF2");
-
-    QSqlQuery query(tools.database());
-
-    query.exec("BEGIN");
-
-    for(double larmorFrequency : fl) {
-    for(double larmorInhomogeneity : il) {
-    for(double densityInhomogeneity : id) {
-    for(double exchangeFrequency: fe) {
-    for(double damping : r) {
-    for(double lossFromF1 : l1) {
-    for(double lossFromF2 : l2) {
-    for(double density : d) {
-        DataPoint point;
-
-        point.larmor                = larmorFrequency;
-        point.larmorInhomogeneity   = larmorInhomogeneity;
-        point.densityInhomogeneity  = densityInhomogeneity * density;
-        point.exchange              = exchangeFrequency * density;
-        point.damping               = damping * density;
-        point.lossFromF1            = lossFromF1 * density;
-        point.lossFromF2            = lossFromF2 * density;
-
-        // Inserts the simuation into the database
-        query.prepare("INSERT INTO simulation"
-                      " (spin_echo, larmor_frequency, larmor_inhomogeneity, density_inhomogeneity, exchange_frequency, damping_rate, loss_1, loss_2, name)"
-                      " VALUES (:s, :l, :i, :d, :e, :r, :l1, :l2, :n);");
-        query.bindValue(":s", int(tools.hasMovingOperation()));
-        query.bindValue(":l", point.larmor);
-        query.bindValue(":i", point.larmorInhomogeneity);
-        query.bindValue(":d", point.densityInhomogeneity);
-        query.bindValue(":e", point.exchange);
-        query.bindValue(":r", point.damping);
-        query.bindValue(":l1", point.lossFromF1);
-        query.bindValue(":l2", point.lossFromF2);
-        query.bindValue(":n", tools.simulationName());
-
-        query.exec();
-
-        // Obtains the simulation id
-        point.simulationId = query.lastInsertId().toInt();
-
-        // Inserts the energy bins into the database
-        point.energyBinId = vector<int>();
-        point.energyBinId.resize(tools.energyBinCount());
-        for(int i = 0; i < tools.energyBinCount(); ++i) {
-            query.prepare("INSERT INTO energy_bin (simulation_id, energy_min, energy_max) VALUES (:s, :a, :b);");
-            query.bindValue(":s", point.simulationId);
-            query.bindValue(":a", tools.energyBin(i).first);
-            query.bindValue(":b", tools.energyBin(i).second);
-
-            query.exec();
-
-            // Obtains the energy bin id
-            point.energyBinId[i] = query.lastInsertId().toInt();
-        }
-
-        if(tools.hasMovingOperation()) {
-            for(int i = 1; i <= tools.timePointsCount(); ++i) {
-                point.totalTime             = tools.totalTime() * ((double)i) / ((double)tools.timePointsCount());
-                point.timeStepCount         = tools.timeStepsCount() * ((double)i) / ((double)tools.timePointsCount());
-
-                // Adds the point to the queue
-                tools.queue().push(point);
-            }
-        } else {
-            point.totalTime     = tools.totalTime();
-            point.timeStepCount = tools.timeStepsCount();
-
-            tools.queue().push(point);
-        }
-    } // d
-    } // l2
-    } // l1
-    } // r
-    } // fe
-    } // id
-    } // il
-    } // fl
-
-    query.exec("COMMIT");
-
-    // Initialize the tools object
-
-    tools.init();
 
     return true;
 }
 
-vector<double> makeList(QScriptEngine * engine, QString pName)
+bool ScriptLoader::evaluate(const QString & script)
 {
-    int length = engine->evaluate("simulation."+pName+".length").toNumber();
+    p_engine->evaluate(script);
 
-    vector<double> result;
-
-    for(int i = 0; i < length; ++i) {
-        result.push_back(engine->evaluate("simulation." + pName + "[" + QString::number(i) + "]").toNumber());
+    if(p_engine->hasUncaughtException())
+    {
+        qDebug() << "ScriptLoader::load: Uncaught exception within the script:";
+        qDebug() << "ScriptLoader::load:" << p_engine->uncaughtException().toString().toUtf8().data();
+        qDebug() << "ScriptLoader::load: Line" << p_engine->uncaughtExceptionLineNumber();
+        for(QString line : p_engine->uncaughtExceptionBacktrace())
+            qDebug() << "ScriptLoader::load:" << line.toUtf8().data();
+        return false;
     }
 
-    return result;
+    return true;
 }

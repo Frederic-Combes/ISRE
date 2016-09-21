@@ -16,16 +16,33 @@ TEMPLATE = app
 
 OBJECTS_DIR = .build/
 
-# Using Eigen
+# Using Eigen, asmjit, mathpresso
 INCLUDEPATH += /home/fred/Documents/Numerique
+# Using ASMJIT
+#DEFINES += ASMJIT_STATIC
+# /!\ Have to replace every "emit" by "emit_noqt"
+#DEFINES += MATHPRESSO_STATIC
 
 SOURCES +=			\
 	main.cpp		\
-	tools.cpp		\
-    script.cpp
+    script.cpp \
+    simulation.cpp \
+    solution.cpp \
+    simulationresult.cpp \
+    compute.cpp \
+    scriptobjects.cpp \
+    result.cpp
+
 HEADERS +=			\
-	tools.h			\
-    script.h
+    script.h \
+    simulation.h \
+    solution.h \
+    simulationresult.h \
+    compute.h \
+    strings.h \
+    scriptobjects.h \
+    result.h
+
 RESOURCES += \
 	resources.qrc
 
@@ -33,11 +50,21 @@ QTPLUGIN += qsqlmysql
 
 DISTFILES += \
     Default.js \
-    Scripts/Simulation/SingleWell.js \
-    Scripts/Gnuplot/FitRR0.gnuplot \
     HowTo \
     SimulationPrototype.js \
-    setup.js \
-    Scripts/Simulation/FitRR0.js \
-    Scripts/Simulation/Test.js
+	setup.js
 
+
+unix:!macx: LIBS += -L$$PWD/../../../Numerique/_Shadow_Release_mathpresso/ -lmathpresso
+
+INCLUDEPATH += $$PWD/../../../Numerique/mathpresso
+DEPENDPATH += $$PWD/../../../Numerique/mathpresso
+
+unix:!macx: PRE_TARGETDEPS += $$PWD/../../../Numerique/_Shadow_Release_mathpresso/libmathpresso.a
+
+unix:!macx: LIBS += -L$$PWD/../../../Numerique/asmjit/_Shadow_Release_asmjit/ -lasmjit
+
+INCLUDEPATH += $$PWD/../../../Numerique/asmjit
+DEPENDPATH += $$PWD/../../../Numerique/asmjit
+
+unix:!macx: PRE_TARGETDEPS += $$PWD/../../../Numerique/asmjit/_Shadow_Release_asmjit/libasmjit.a

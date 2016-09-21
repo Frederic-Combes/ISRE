@@ -1,2 +1,5 @@
-<RCC/>
-
+<RCC>
+    <qresource prefix="/Setup">
+        <file>setup.js</file>
+    </qresource>
+</RCC>
