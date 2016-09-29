@@ -26,24 +26,6 @@
 #include <QScriptValue>
 #include "scriptobjects.h"
 
-// TODO : turn to ScriptObject
-class Simulation
-{
-public:
-    Simulation();
-
-    void setName(QString name) {p_name = name;}
-    QString name() const {return p_name;}
-
-    void setCode(int index, QString code);
-    QString code(int index) const;
-
-private:
-    QString                     p_name;
-
-    std::vector<QString>        p_code;
-};
-
 class SimulationContext
 {
 public:
@@ -55,14 +37,14 @@ public:
     void setOverwrite(bool overwrite = false);
 
     void setSettings(ScriptObject::Settings settings);
-    void setSimulation(const Simulation & simulation);
+    void setSimulation(const ScriptObject::Simulation & simulation);
     void addParameter(ScriptObject::Parameter parameter);
     void addFunction(ScriptObject::Function function);
     void addOperation(ScriptObject::Operation operation);
 
-    inline const ScriptObject::Settings & settings() const {return p_settings;}
-    inline const Simulation & simulation() const {return p_simulation;}
-    inline bool allOperationsAreFixedTime() const {return p_allOperationsAreFixedTime;}
+    inline const ScriptObject::Settings & settings() const;
+    inline const ScriptObject::Simulation & simulation() const;
+    inline bool allOperationsAreFixedTime() const;
 
     const CompiledFunctions & functions(unsigned int index = 0) const;
 
@@ -70,21 +52,15 @@ public:
 
     int getIndex(double * & data);
 
-    // TODO: these 4 functions aren't needed?
-    std::mutex &                databaseLock() {return p_dbLock;}
-    QSqlDatabase &              database() {return p_database;}
-    const std::vector<int> &    ids(int simulationIndex) {return p_indexToIds[simulationIndex];}
-    const std::vector<int> &    ids() const {return p_ids;}
-
     void prepare();
-    void end();
+    std::vector<ScriptObject::Result> end();
 
     // TODO : auto release / regain the data ptr (as well as the Operations vector)!
     // HINT: use unique_ptr<double[], allocator> ?
     bool next(unsigned int & simulationIndex);          // Set simulationIndex to the next simulation index, and return true. Return false if there are no more simulations to run
     double * data(int simulationIndex) const;           // Returns the data needed for the simulation indexed by simulationIndex
     Operations operations(int simulationIndex) const;   // Returns the time-ordered list of operations needed for the simulation indexed by simulationIndex
-    const std::vector<ResultPtr> & results(unsigned int simulationIndex) const;
+    const std::vector<std::shared_ptr<SimulationResult>> & results(unsigned int simulationIndex) const;
 
 private:
     void prepareFunctions(mathpresso::Context & context);
@@ -97,7 +73,7 @@ private:
     bool                                    p_overwrite;
 
     ScriptObject::Settings                  p_settings;
-    Simulation                              p_simulation;
+    ScriptObject::Simulation                p_simulation;
     std::vector<ScriptObject::Parameter>    p_parameters;
     std::vector<ScriptObject::Function>     p_functions;
     std::vector<ScriptObject::Operation>    p_operations;
@@ -111,18 +87,35 @@ private:
     unsigned int        p_simulationCount;
     unsigned int        p_currentSimulation;
 
-    std::mutex          p_dbLock;
     QSqlDatabase        p_database;
 
-    std::vector<std::vector<ResultPtr>> p_simulationResults;
+    // TODO: turn into pairs
+    std::vector<std::vector<std::shared_ptr<SimulationResult>>> p_simulationResults;
+    std::vector<std::vector<std::shared_ptr<SimulationDescription>>> p_simulationDescriptions;
+
     std::vector<unsigned int> p_simulationIndexes;
-    std::map<unsigned int, std::vector<int> > p_indexToIds;
-    std::vector<int> p_ids;
 };
 
 namespace ComputeFor {
     enum {Initialization = 1, Step = 2, Operation = 3,
           Max};
+}
+
+/* Inline functions *****************************************************************************************/
+
+const ScriptObject::Settings & SimulationContext::settings() const
+{
+    return p_settings;
+}
+
+const ScriptObject::Simulation & SimulationContext::simulation() const
+{
+    return p_simulation;
+}
+
+bool SimulationContext::allOperationsAreFixedTime() const
+{
+    return p_allOperationsAreFixedTime;
 }
 
 #endif // SIMULATION_H

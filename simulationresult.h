@@ -21,8 +21,7 @@ class QScriptEngine;
 class QScriptContext;
 #include <QSharedPointer>
 
-// TODO: Rename to TableScriptObject (?)
-class SimulationResult
+/*class SimulationResult
 {
 public:
     enum Table {Result, Description};
@@ -85,7 +84,7 @@ Q_DECLARE_OPERATORS_FOR_FLAGS(SimulationResult::WriteFlags)
 
 // TODO: use std::shared_ptr (?) or better, unique_ptr
 typedef QSharedPointer<SimulationResult> SimulationResultPtr;
-Q_DECLARE_METATYPE(SimulationResultPtr)
+Q_DECLARE_METATYPE(SimulationResultPtr)*/
 
 // TODO: Rename to LineScriptObject (?) & implement
 class SimulationResultLine

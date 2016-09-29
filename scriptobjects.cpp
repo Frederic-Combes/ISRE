@@ -1,5 +1,13 @@
 #include "scriptobjects.h"
+
 #include "strings.h"
+#include "result.h"
+
+#include <QScriptContext>
+#include <QScriptEngine>
+
+#include <QFile>
+#include <QTextStream>
 
 #include <boost/math/special_functions/bessel.hpp>
 
@@ -172,4 +180,173 @@ void Settings::addEnergyBin(double energyMin, double energyMax)
     }
 }
 
+/*************************************************************************************************************
+ * Class Result
+ ************************************************************************************************************/
+
+/*************************************************************************************************************
+ * Static Public Members
+ ************************************************************************************************************/
+
+QScriptValue Result::scriptFunctionMatches(QScriptContext * context, QScriptEngine * engine)
+{
+    // Check argument count
+    if(context->argumentCount() != 2) {
+        qDebug() << "ScriptObject::Result.matches called with an incorrect parameter count:" << context->argumentCount() << ", expected 2 arguments.";
+        return QScriptValue::UndefinedValue;
+    }
+
+    // Check argument type
+    if(!context->argument(0).isString()) {
+        qDebug() << "ScriptObject::Result.matches: argument 0 is not a string";
+        return QScriptValue::UndefinedValue;
+    }
+
+    if(!context->argument(1).isArray()) {
+        qDebug() << "ScriptObject::Result.matches: argument 1 is not an array";
+        return QScriptValue::UndefinedValue;
+    }
+
+    Result result = context->thisObject().data().toVariant().value<Result>();
+
+    // Check whether the object metadata contains the field given as argument 0
+    auto pair = result.metadata(context->argument(0).toString());
+
+    if(!pair.first) {
+        return false;
+    }
+
+    QString & value = pair.second;
+
+    // Check whether the value matches
+    for(qint32 i = 0; i < context->argument(1).property("length").toInt32(); ++i) {
+        QScriptValue compareTo = context->argument(1).property(i);
+
+        if(compareTo.isString()) {
+            if(QString::compare(value, compareTo.toString()) == 0) {
+                return true;
+            }
+        } else if(compareTo.isNumber()) {
+            if(value.toDouble() == compareTo.toNumber()) {
+                // TODO : precision / conversion issues
+                return true;
+            }
+        } else if(compareTo.isFunction()){
+            if(compareTo.call(QScriptValue(), QScriptValue(engine, value)).toBool()) {
+                return true;
+            }
+        } else {
+            qDebug() << "ScriptObject::Result.matches: value is neither a string nor a number nor a function";
+        }
+    }
+
+    return false;
 }
+
+QScriptValue Result::scriptFunctionExport(QScriptContext * context, QScriptEngine * /*engine*/)
+{
+    // Check argument count
+    if(context->argumentCount() != 3) {
+        qDebug() << "ScriptObject::Result.export called with an incorrect parameter count:" << context->argumentCount() << ", expected 3 arguments.";
+        return QScriptValue::UndefinedValue;
+    }
+
+    // Check argument type
+    if(!context->argument(0).isString()) {
+        qDebug() << "ScriptObject::Result.export: argument 0 is not a string";
+        return QScriptValue::UndefinedValue;
+    }
+
+    if(!context->argument(1).isString()) {
+        qDebug() << "ScriptObject::Result.export: argument 1 is not a string";
+        return QScriptValue::UndefinedValue;
+    }
+
+    if(!context->argument(2).isArray()) {
+        qDebug() << "ScriptObject::Result.export: argument 2 is not an array of string";
+        return QScriptValue::UndefinedValue;
+    }
+
+    Result result = context->thisObject().data().toVariant().value<Result>();
+
+    QString filename = context->argument(0).toString();
+    QString options = context->argument(1).toString();
+
+    // Converts column names to indexes
+    vector<SimulationResult::Index> columnIndexes;
+    for(quint32 i = 0; i < context->argument(2).property("length").toUInt32(); ++i) {
+        SimulationResult::Index columnIndex;
+
+        if(SimulationResult::convertToColumnIndex(context->argument(2).property(i).toString(), columnIndex)) {
+            columnIndexes.push_back(columnIndex);
+        }
+    }
+
+    qDebug() << "ScriptObject::Result.write: opening file" << filename;
+
+    QFile file(filename);
+
+    QIODevice::OpenMode openMode = QIODevice::WriteOnly;
+    openMode |= options.contains("a") ? QIODevice::Append : QIODevice::OpenModeFlag(0);
+    openMode |= options.contains("o") ? QIODevice::Truncate : QIODevice::OpenModeFlag(0);
+
+    if(!file.open(openMode)) {
+        qDebug() << "ScriptObject::Result.export: failed to open the file" << filename;
+        return QScriptValue::UndefinedValue;
+    }
+
+    QTextStream stream(&file);
+
+    stream.setFieldWidth(12);
+    stream.setFieldAlignment(QTextStream::AlignLeft);
+
+    for(double time : *result.p_simulationResult.get()) {
+        for(auto columnIndex : columnIndexes) {
+            stream << result.p_simulationResult->interpolate(time, columnIndex);
+        }
+
+        stream.setFieldWidth(0);
+        stream << endl;
+        stream.setFieldWidth(12);
+    }
+    stream.setFieldWidth(0);
+    stream << endl;
+
+    file.close();
+    return QScriptValue::UndefinedValue;
+
+}
+
+/*************************************************************************************************************
+ * Constructors
+ ************************************************************************************************************/
+
+Result::Result()
+{}
+
+Result::Result(unsigned int id, shared_ptr<SimulationResult> simulationResult, shared_ptr<SimulationDescription> simulationDescription)
+    : p_id(id), p_simulationResult(simulationResult), p_simulationDescription(simulationDescription) {}
+
+/*************************************************************************************************************
+ * Public Members
+ ************************************************************************************************************/
+
+void Result::setMetadata(QString name, QString value)
+{
+    if(p_simulationDescription == nullptr) {
+        p_simulationDescription = make_shared<SimulationDescription>();
+    }
+
+    p_simulationDescription->setValue(name, value);
+}
+
+pair<bool, QString> Result::metadata(QString name) const
+{
+    if(p_simulationDescription == nullptr) {
+        return {false, QString()};
+    }
+
+    return p_simulationDescription->value(name);
+}
+
+} // namespace ScriptObject

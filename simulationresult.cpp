@@ -37,7 +37,7 @@ using namespace std;
  * Static Public Members
  ************************************************************************************************************/
 
-QScriptValue SimulationResult::scriptFunctionTableConstructor(QScriptContext * context, QScriptEngine * engine)
+/*QScriptValue SimulationResult::scriptFunctionTableConstructor(QScriptContext * context, QScriptEngine * engine)
 {
     // C++ object that is wrapped by the script
     SimulationResultPtr result = SimulationResultPtr::create(vector<int>());
@@ -359,13 +359,13 @@ QScriptValue SimulationResult::scriptFunctionTableErase(QScriptContext * context
     result->erase();
 
     return QScriptValue::UndefinedValue;
-}
+}*/
 
 /*************************************************************************************************************
  * Constructors
  ************************************************************************************************************/
 
-SimulationResult::SimulationResult(vector<int> ids)
+/*SimulationResult::SimulationResult(vector<int> ids)
     : p_ids(ids)
 {
     // Obtain & open the database
@@ -392,13 +392,13 @@ SimulationResult::SimulationResult(const SimulationResult & other)
     }
 
     openDatatabase();
-}
+}*/
 
 /*************************************************************************************************************
  * Public Members
  ************************************************************************************************************/
 
-void SimulationResult::select(QString name, QScriptValue function, Table table)
+/*void SimulationResult::select(QString name, QScriptValue function, Table table)
 {
     switch(table) {
     case Description:
@@ -661,13 +661,13 @@ void SimulationResult::erase() const
         qDebug() << "SimulationResult::erase: executed the query:" << query.executedQuery().toUtf8().data();
     }
 
-}
+}*/
 
 /*************************************************************************************************************
  * Private Members
  ************************************************************************************************************/
 
-void SimulationResult::openDatatabase() const
+/*void SimulationResult::openDatatabase() const
 {
     if(p_database.isOpen()) {
         return;
@@ -757,4 +757,4 @@ void SimulationResult::write(std::vector<int> ids, QTextStream & stream, const v
         }
         stream << qSetFieldWidth(0) << endl << qSetFieldWidth(fieldWidth);
     }
-}
+}*/

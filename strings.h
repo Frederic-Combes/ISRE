@@ -127,11 +127,15 @@ namespace Function {
 constexpr const char * Name = "name";
 constexpr const char * Code = "code";
 
-}
+} // namespace Function
 
-namespace Table {
+namespace Result {
 
-} // Namespace Table
+constexpr const char * Matches = "_privateMatches";
+constexpr const char * Export = "write";
+constexpr const char * Erase = "erase";
+
+} // Namespace Result
 
 } // namespace Script
 

@@ -7,6 +7,7 @@
 
 #include <QSqlDatabase>
 #include <QSqlQuery>
+#include <QSqlError>
 
 #include <QDebug>
 
@@ -17,6 +18,8 @@
 
 using namespace std;
 using namespace ScriptObject;
+
+namespace ScriptObject {
 
 /*************************************************************************************************************
  * Class Simulation
@@ -49,6 +52,8 @@ QString Simulation::code(int index) const
 
     return p_code[index];
 }
+
+} // namespace ScriptObject
 
 /*************************************************************************************************************
  * Class SimulationContext
@@ -281,25 +286,58 @@ void SimulationContext::prepare()
     prepareResults();
 }
 
-void SimulationContext::end()
+vector<ScriptObject::Result> SimulationContext::end()
 {
+    vector<ScriptObject::Result> savedResults;
+
     p_database.transaction();
 
-    qDebug() << "SimulationContext::end: saving the data...";
-    for(vector<ResultPtr> & results : p_simulationResults) {
-        // The last ResultPtr of results points to the main result (without energy bins)
-        lock_guard<mutex> mainLock(results.back()->lock()); (void) mainLock;
-        unsigned int mainId = results.back()->write(p_database, p_simulation.name());
+    QSqlQuery query(p_database);
+    query.prepare("INSERT INTO simulation (name, timestamp) VALUES (:n, :t);");
 
-        // Other ResultPtr of results points to energy-bin results
-        for(unsigned int i = 0; i < results.size() - 1; ++i) {
-            lock_guard<mutex> lock(results[i]->lock()); (void) lock;
-            results[i]->metadata().emplace(Strings::Database::Description::MainSimulationID, QString::number(mainId));
-            results[i]->write(p_database, p_simulation.name());
+    for(unsigned int i = p_parameters.front().values.size() - 1; i < p_simulationCount; i += p_parameters.front().values.size()) {
+        vector<shared_ptr<SimulationResult>> & results = p_simulationResults[i / p_parameters.front().values.size()];
+        vector<shared_ptr<SimulationDescription>> & descriptions = p_simulationDescriptions[i / p_parameters.front().values.size()];
+
+        query.bindValue(":n", p_simulation.name());
+        query.bindValue(":t", QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss:zzz"));
+
+        if(!query.exec()) {
+            qDebug() << "SimulationContext::end: failed to exec query" << query.lastQuery();
+            qDebug() << "SimulationContext::end:" << query.lastError().text();
+        }
+
+        unsigned int mainSimulationDatabaseId = query.lastInsertId().toUInt();
+
+        results.back()->write(p_database, mainSimulationDatabaseId);
+        descriptions.back()->write(p_database, mainSimulationDatabaseId);
+
+        savedResults.push_back(ScriptObject::Result(mainSimulationDatabaseId, results.back(), descriptions.back()));
+
+        // Other shared_prt<SimulationResult> of results points to energy-bin results
+        for(unsigned int j = 0; j < results.size() - 1; ++j) {
+            descriptions[j]->setValue(Strings::Database::Description::MainSimulationID, QString::number(mainSimulationDatabaseId));
+
+            query.bindValue(":n", p_simulation.name());
+            query.bindValue(":t", QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss:zzz"));
+
+            if(!query.exec()) {
+                qDebug() << "SimulationContext::end: failed to exec query" << query.lastQuery();
+                qDebug() << "SimulationContext::end:" << query.lastError().text();
+            }
+
+            unsigned int databaseId = query.lastInsertId().toUInt();;
+
+            results[j]->write(p_database, databaseId);
+            descriptions[j]->write(p_database, databaseId);
+
+            savedResults.push_back(ScriptObject::Result(databaseId, results[j], descriptions[j]));
         }
     }
 
     p_database.commit();
+
+    return savedResults;
 }
 
 bool SimulationContext::next(unsigned int & simulationIndex)
@@ -356,7 +394,7 @@ SimulationContext::Operations SimulationContext::operations(int simulationIndex)
     return operations;
 }
 
-const vector<ResultPtr> & SimulationContext::results(unsigned int simulationIndex) const
+const vector<shared_ptr<SimulationResult>> & SimulationContext::results(unsigned int simulationIndex) const
 {
     return p_simulationResults.at(simulationIndex / p_parameters.front().values.size());
 }
@@ -501,42 +539,45 @@ void SimulationContext::prepareResults()
     // The first parameter is the duration parameter. Simulation with all paramters identical but the duration
     // parameter share the same result table
     for(unsigned int i = p_parameters.front().values.size() - 1; i < p_simulationCount; i += p_parameters.front().values.size()) {
-        p_simulationResults.push_back(vector<ResultPtr>());
-        vector<ResultPtr> & results = p_simulationResults.back();
+        p_simulationResults.push_back(vector<shared_ptr<SimulationResult>>());
+        p_simulationDescriptions.push_back(vector<shared_ptr<SimulationDescription>>());
+
+        vector<shared_ptr<SimulationResult>> & results = p_simulationResults.back();
+        vector<shared_ptr<SimulationDescription>> & descriptions = p_simulationDescriptions.back();
 
         // Simulation result table for the energy bins
         for(Settings::EnergyBin bin : p_settings.energyBins()) {
-            results.emplace_back(new Result);
+            results.push_back(make_shared<SimulationResult>(p_settings.saveCount()));
+            descriptions.push_back(make_shared<SimulationDescription>());
 
-            using namespace Strings::Database;
-            results.back()->metadata().emplace(QString(Description::EnergyBinMinimum), QString::number(p_settings.energySamples().at(bin.first)));
-            results.back()->metadata().emplace(QString(Description::EnergyBinMaximum),
+            descriptions.back()->setValue(QString(Strings::Database::Description::EnergyBinMinimum), QString::number(p_settings.energySamples().at(bin.first)));
+            descriptions.back()->setValue(QString(Strings::Database::Description::EnergyBinMaximum),
                 p_settings.energySamples().size() > bin.second ? QString::number(p_settings.energySamples().at(bin.second)) : QString("inf"));
         }
 
         // Main simulation result table
-        results.emplace_back(new Result);
+        results.push_back(make_shared<SimulationResult>(p_settings.saveCount()));
+        descriptions.push_back(make_shared<SimulationDescription>());
 
         // Saving settings in the main result table metadata
-        using namespace Strings::Database;
-        results.back()->metadata().emplace(QString(Description::Dimension),              QString::number(p_settings.dimension()));
-        results.back()->metadata().emplace(QString(Description::Duration),               QString::number(p_settings.duration()));
-        results.back()->metadata().emplace(QString(Description::NumberOfTimesteps),      QString::number(p_settings.timestepCount()));
-        results.back()->metadata().emplace(QString(Description::NumberOfSavedPoints),    QString::number(p_settings.saveCount()));
-        results.back()->metadata().emplace(QString(Description::NumberOfEnergySamples),  QString::number(p_settings.energySamples().size()));
+        descriptions.back()->setValue(Strings::Database::Description::Dimension,              QString::number(p_settings.dimension()));
+        descriptions.back()->setValue(Strings::Database::Description::Duration,               QString::number(p_settings.duration()));
+        descriptions.back()->setValue(Strings::Database::Description::NumberOfTimesteps,      QString::number(p_settings.timestepCount()));
+        descriptions.back()->setValue(Strings::Database::Description::NumberOfSavedPoints,    QString::number(p_settings.saveCount()));
+        descriptions.back()->setValue(Strings::Database::Description::NumberOfEnergySamples,  QString::number(p_settings.energySamples().size()));
 
         // Saving functions and parameters
         unsigned int j = i;
         for(Parameter parameter : p_parameters) {
             if(QString::compare(parameter.name, Strings::JIT::Variables::Duration) != 0) {
-                results.back()->metadata().emplace(QString(parameter.name), QString::number(parameter.values[j % parameter.values.size()]));
+                descriptions.back()->setValue(parameter.name, QString::number(parameter.values[j % parameter.values.size()]));
             }
 
             j /=  parameter.values.size();
         }
 
         for(CompiledFunction * function : p_compiledFunctions) {
-            results.back()->metadata().insert({function->name(), function->code()});
+            descriptions.back()->setValue(function->name(), function->code());
         }
 
         for(unsigned int j = p_parameters.front().values.size(); j != 0; --j) {
@@ -544,148 +585,3 @@ void SimulationContext::prepareResults()
         }
     }
 }
-
-/*void SimulationContext::prepareResults_old()
-{
-    using namespace Strings::Database;
-
-    p_simulationCount = accumulate(p_parameters.begin(), p_parameters.end(), int(1),
-        [](int value, const Parameter & parameter) {
-            return value * parameter.values.size();
-        });
-
-    p_database.transaction();
-    QSqlQuery query(p_database);
-
-    // This loop 'skips' the duration parameter
-    for(unsigned int i = p_parameters.front().values.size() - 1; i < p_simulationCount; i += p_parameters.front().values.size()) {
-
-        bool insert = false;
-        bool overwrite = true;
-
-        if(overwrite) {
-            insert = true;
-        } else {
-            insert = true; // To remove
-            // Look for the simulation in the database
-            // int id =
-            // insert = false;
-            // p_allIds.push_back(...)
-        }
-
-        // The simulation is already done and overwrite is false
-        if(!insert) {
-            continue;
-        }
-
-        // The simulation was not performed - saves its description
-        query.prepare("INSERT INTO simulation (name, timestamp) VALUES (:n,:t);");
-        query.bindValue(":n", p_simulation.name());
-        query.bindValue(":t", QDate::currentDate().toString("yyyy-MM-dd"));
-
-        query.exec();
-
-        int simulationID = query.lastInsertId().toInt();
-
-        vector<int> ids;
-        for(Settings::EnergyBin bin : p_settings.energyBins()) {
-            query.prepare("INSERT INTO simulation (name, timestamp) VALUES (:n,:t);");
-            query.bindValue(":n", p_simulation.name() + QString(" (Energy bin)"));
-            query.bindValue(":t", QDate::currentDate().toString("yyyy-MM-dd"));
-
-            query.exec();
-
-            ids.push_back(query.lastInsertId().toInt());
-
-            query.prepare("INSERT INTO description (id, name, value) VALUES (:id, :n, :e);");
-
-            query.bindValue(":id", ids.back());
-            query.bindValue(":n", Description::MainSimulationID);
-            query.bindValue(":e", QString::number(simulationID));
-            query.exec();
-
-            query.bindValue(":id", ids.back());
-            query.bindValue(":n", Description::EnergyBinMinimum);
-            query.bindValue(":e", p_settings.energySamples().at(bin.first));
-            query.exec();
-
-            query.bindValue(":id", ids.back());
-            query.bindValue(":n", Description::EnergyBinMaximum);
-            query.bindValue(":e", p_settings.energySamples().size() > bin.second ? QString::number(p_settings.energySamples().at(bin.second)) : QString("inf"));
-            query.exec();
-        }
-
-        ids.push_back(simulationID);
-
-        // Saving simulation settings
-        query.prepare("INSERT INTO description (id, name, value) VALUES (:id, :n, :v);");
-
-        query.bindValue(":id", simulationID);
-        query.bindValue(":n", Description::Dimension);
-        query.bindValue(":v", QString::number(p_settings.dimension()));
-        query.exec();
-
-        query.bindValue(":id", simulationID);
-        query.bindValue(":n", Description::Duration);
-        query.bindValue(":v", QString::number(p_settings.duration()));
-        query.exec();
-
-        query.bindValue(":id", simulationID);
-        query.bindValue(":n", Description::NumberOfTimesteps);
-        query.bindValue(":v", QString::number(p_settings.timestepCount()));
-        query.exec();
-
-        query.bindValue(":id", simulationID);
-        query.bindValue(":n", Description::NumberOfSavedPoints);
-        query.bindValue(":v", QString::number(p_settings.saveCount()));
-        query.exec();
-
-        query.bindValue(":id", simulationID);
-        query.bindValue(":n", Description::NumberOfEnergySamples);
-        query.bindValue(":v", QString::number(p_settings.energySamples().size()));
-        query.exec();
-
-        // Saving functions and parameters
-        unsigned int j = i;
-        for(Parameter parameter : p_parameters) {
-            unsigned int k = j % parameter.values.size();
-            j = (j - k) / parameter.values.size();
-
-            if(QString::compare(parameter.name, "duration") == 0) {
-                continue;
-            }
-
-            query.bindValue(":id", simulationID);
-            query.bindValue(":n", parameter.name);
-            query.bindValue(":v", QString::number(parameter.values[k]));
-            query.exec();
-        }
-
-        for(CompiledFunction * function : p_compiledFunctions) {
-            query.bindValue(":id", simulationID);
-            query.bindValue(":n", function->name());
-            query.bindValue(":v", function->code());
-            query.exec();
-        }
-
-        // Marker field removed when the simulation is completed
-        query.bindValue(":id", simulationID);
-        query.bindValue(":n", Description::SimulationIncomplete);
-        query.bindValue(":v", QString());
-        query.exec();
-
-        // We add the inserted ids to the list of database ids
-        for(int id : ids) {
-            p_ids.push_back(id);
-        }
-
-        // We add the simulations indexes to the list of simulations to perform as well as the simulation-index-to-ids entry
-        // The loop here is due to the skipped duration parameter
-        for(unsigned int j = p_parameters.front().values.size(); j != 0; --j) {
-            p_simulationIndexes.push_back(i-j+1);
-            p_indexToIds.insert(make_pair(i-j+1, ids));
-        }
-    }
-
-    p_database.commit();
-}*/

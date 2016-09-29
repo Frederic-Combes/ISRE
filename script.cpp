@@ -181,7 +181,8 @@ QScriptValue ScriptLoader::scriptFunctionSimulationConstructor(QScriptContext * 
     // Bind C++ function to Simulation.run
     thisObject.setProperty(Simulation::Run, engine->newFunction(ScriptLoader::scriptFunctionSimulationRun));
 
-    // Default values
+    // TODO: move this to setup.js
+    //Default values
     thisObject.setProperty(Simulation::Frequency, QScriptValue(engine, "0"));
     thisObject.setProperty(Simulation::Exchange, QScriptValue(engine, "0"));
     thisObject.setProperty(Simulation::Damping, QScriptValue(engine, "0"));
@@ -223,14 +224,14 @@ QScriptValue ScriptLoader::scriptFunctionSimulationRun(QScriptContext * context,
 
     simulation.setName(sim.property(StrScr::Simulation::Name).toString());
 
-    simulation.setCode(Index::Frequency,        sim.property(StrScr::Simulation::Frequency).toString());
-    simulation.setCode(Index::Exchange,         sim.property(StrScr::Simulation::Exchange).toString());
-    simulation.setCode(Index::Damping,          sim.property(StrScr::Simulation::Damping).toString());
-    simulation.setCode(Index::AtomLossFromF1,   sim.property(StrScr::Simulation::AtomLoss).property(StrScr::AtomLoss::FromF1).toString());
-    simulation.setCode(Index::AtomLossFromF2,   sim.property(StrScr::Simulation::AtomLoss).property(StrScr::AtomLoss::FromF2).toString());
-    simulation.setCode(Index::InitialSpinX,     sim.property(StrScr::Simulation::InitialSpin).property(0).toString());
-    simulation.setCode(Index::InitialSpinY,     sim.property(StrScr::Simulation::InitialSpin).property(1).toString());
-    simulation.setCode(Index::InitialSpinZ,     sim.property(StrScr::Simulation::InitialSpin).property(2).toString());
+    simulation.setCode(Index::Frequency,        sim.property(Strings::Script::Simulation::Frequency).toString());
+    simulation.setCode(Index::Exchange,         sim.property(Strings::Script::Simulation::Exchange).toString());
+    simulation.setCode(Index::Damping,          sim.property(Strings::Script::Simulation::Damping).toString());
+    simulation.setCode(Index::AtomLossFromF1,   sim.property(Strings::Script::Simulation::AtomLoss).property(Strings::Script::AtomLoss::FromF1).toString());
+    simulation.setCode(Index::AtomLossFromF2,   sim.property(Strings::Script::Simulation::AtomLoss).property(Strings::Script::AtomLoss::FromF2).toString());
+    simulation.setCode(Index::InitialSpinX,     sim.property(Strings::Script::Simulation::InitialSpin).property(0).toString());
+    simulation.setCode(Index::InitialSpinY,     sim.property(Strings::Script::Simulation::InitialSpin).property(1).toString());
+    simulation.setCode(Index::InitialSpinZ,     sim.property(Strings::Script::Simulation::InitialSpin).property(2).toString());
 
     SimulationContext simulationContext;
 
@@ -238,15 +239,15 @@ QScriptValue ScriptLoader::scriptFunctionSimulationRun(QScriptContext * context,
     simulationContext.setSimulation(simulation);
 
     for(quint32 i = 0; i < sim.property(StrScr::Simulation::Parameters).property("length").toUInt32(); ++i) {
-        simulationContext.addParameter(ScriptObject::Parameter::fromScriptValue(sim.property(StrScr::Simulation::Parameters).property(i)));
+        simulationContext.addParameter(ScriptObject::Parameter::fromScriptValue(sim.property(Strings::Script::Simulation::Parameters).property(i)));
     }
 
     for(quint32 i = 0; i < sim.property(StrScr::Simulation::Functions).property("length").toUInt32(); ++i) {
-        simulationContext.addFunction(ScriptObject::Function::fromScriptValue(sim.property(StrScr::Simulation::Functions).property(i)));
+        simulationContext.addFunction(ScriptObject::Function::fromScriptValue(sim.property(Strings::Script::Simulation::Functions).property(i)));
     }
 
     for(quint32 j = 0; j < sim.property(StrScr::Simulation::Operations).property("length").toUInt32(); ++j) {
-        simulationContext.addOperation(ScriptObject::Operation::fromScriptValue(sim.property(StrScr::Simulation::Operations).property(j)));
+        simulationContext.addOperation(ScriptObject::Operation::fromScriptValue(sim.property(Strings::Script::Simulation::Operations).property(j)));
     }
 
 
@@ -274,24 +275,25 @@ QScriptValue ScriptLoader::scriptFunctionSimulationRun(QScriptContext * context,
         delete t;
     }
 
-    simulationContext.end();
+    vector<ScriptObject::Result> results = simulationContext.end();
 
     auto endTime = chrono::high_resolution_clock::now();
     qDebug() << "ScriptLoader::scriptFunction:Simulation.run: simulation ended succesfully ("
              << chrono::duration_cast<chrono::milliseconds>(endTime - startTime).count() << "ms)";
 
-    QScriptValue returnValue = engine->newObject();
+    QScriptValue returnValue = engine->newArray(results.size());
 
-    // Adds the function to the script object
-    returnValue.setProperty("select",    engine->newFunction(SimulationResult::scriptFunctionTableSelect));
-    returnValue.setProperty("mergeWith", engine->newFunction(SimulationResult::scriptFunctionTableMergeWith));
-    returnValue.setProperty("joinWith",  engine->newFunction(SimulationResult::scriptFunctionTableJoinWith));
-    returnValue.setProperty("order",     engine->newFunction(SimulationResult::scriptFunctionTableOrder));
-    returnValue.setProperty("list",      engine->newFunction(SimulationResult::scriptFunctionTableList));
-    returnValue.setProperty("write",     engine->newFunction(SimulationResult::scriptFunctionTableWrite));
-    returnValue.setProperty("erase",     engine->newFunction(SimulationResult::scriptFunctionTableErase));
+    for(unsigned int i = 0; i < results.size(); ++i) {
+        QScriptValue resultScriptObject = engine->evaluate("new Result()");
 
-    returnValue.setData(engine->newVariant(QVariant::fromValue(SimulationResultPtr::create(simulationContext.ids()))));
+        resultScriptObject.setProperty(Strings::Script::Result::Matches, engine->newFunction(ScriptObject::Result::scriptFunctionMatches));
+        resultScriptObject.setProperty(Strings::Script::Result::Export, engine->newFunction(ScriptObject::Result::scriptFunctionExport));
+        //resultScriptObject.setProperty(Strings::Script::Result::Erase, engine->newFunction(ScriptObject::Result::scriptFunctionErase));
+
+        resultScriptObject.setData(engine->newVariant(QVariant::fromValue(results.at(i))));
+
+        returnValue.setProperty(i, resultScriptObject);
+    }
 
     return returnValue;
 }
@@ -308,13 +310,12 @@ QScriptEngine * ScriptLoader::p_engine = NULL;
 
 void ScriptLoader::init()
 {
-    if(p_engine == NULL) {
+    if(p_engine == nullptr) {
         p_engine = new QScriptEngine();
 
         // Add additional functions to the script environment
         p_engine->globalObject().setProperty("loadScript",  p_engine->newFunction(ScriptLoader::scriptFunctionLoadScript));
         p_engine->globalObject().setProperty("Simulation",  p_engine->newFunction(ScriptLoader::scriptFunctionSimulationConstructor));
-        p_engine->globalObject().setProperty("Table",       p_engine->newFunction(SimulationResult::scriptFunctionTableConstructor));
 
         // Load the setup file
         QFile setupFile(":/Setup/setup.js");

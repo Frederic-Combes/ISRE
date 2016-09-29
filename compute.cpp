@@ -55,7 +55,7 @@ void threadLoop(SimulationContext & context)
         // Operations are returned in a time-ordered fashion
         SimulationContext::Operations operations = context.operations(simulationIndex);
         // Where to store the simulation results
-        const vector<ResultPtr> & results = context.results(simulationIndex);
+        const vector<shared_ptr<SimulationResult>> & results = context.results(simulationIndex);
 
         context.evaluateFunctions(ComputeFor::Initialization,   Compute::AtStart, data);
         context.evaluateFunctions(ComputeFor::Step,             Compute::AtStart, data);
@@ -77,76 +77,13 @@ void threadLoop(SimulationContext & context)
             applyOperation(operation, solution, settings);
         }
 
-        // Getting database IDs
-        //vector<int> simulationIds = context.ids(simulationIndex);
-
-        // Saving data
-        /*context.databaseLock().lock();
-
-        // Starting the SQL transaction
-        db.transaction();
-
-        // Prepare the queries
-        QSqlQuery sqlSimulationResult(db);
-        sqlSimulationResult.prepare("INSERT INTO result (id, time, s_x, s_y, s_z, contrast, lost_1, lost_2, phase) VALUES (:s, :t, :x, :y, :z, :c, :l1, :l2, :p);");
-
-        QSqlQuery sqlEnergyBinResult(db);
-        sqlEnergyBinResult.prepare("INSERT INTO result (id, time, s_x, s_y, s_z, contrast, phase) VALUES (:i, :t, :x, :y, :z, :c, :p);");
-
-        for(unsigned int t = 0; t < solution.save.size(); ++t) {
-            // Time we are saving the values for
-            double time = solution.save(t).timestep * data[Index::Duration] / data[Index::TimestepCount];
-
-            // Total Spin
-            sqlSimulationResult.bindValue(":s",  simulationIds.back());
-            sqlSimulationResult.bindValue(":t",  time);
-            sqlSimulationResult.bindValue(":x",  solution.save(t).total.spin(0));
-            sqlSimulationResult.bindValue(":y",  solution.save(t).total.spin(1));
-            sqlSimulationResult.bindValue(":z",  solution.save(t).total.spin(2));
-            // NOTE: Experimentally measured contrast is sqrt(s_x² + s_y²)
-            sqlSimulationResult.bindValue(":c",  solution.save(t).total.spin.head<3>().norm());
-            sqlSimulationResult.bindValue(":l1", solution.save(t).total.atomLosses(1));
-            sqlSimulationResult.bindValue(":l2", solution.save(t).total.atomLosses(2));
-            sqlSimulationResult.bindValue(":p",  solution.save(t).total.phase);
-
-            sqlSimulationResult.exec();
-
-            // Partial spin
-            for(unsigned int i = 0; i < settings.energyBins().size(); ++i) {
-                sqlEnergyBinResult.bindValue(":i", simulationIds.at(i));
-                sqlEnergyBinResult.bindValue(":t", time);
-                sqlEnergyBinResult.bindValue(":x", solution.save(t).partial(i).spin(0));
-                sqlEnergyBinResult.bindValue(":y", solution.save(t).partial(i).spin(1));
-                sqlEnergyBinResult.bindValue(":z", solution.save(t).partial(i).spin(2));
-                sqlEnergyBinResult.bindValue(":c", solution.save(t).partial(i).spin.head<3>().norm());
-                sqlEnergyBinResult.bindValue(":p", solution.save(t).partial(i).phase);
-
-                sqlEnergyBinResult.exec();
-            }
-        }
-
-        // If the simulation has no moving operations, then at this point it is complete and we can remove the
-        // marker.
-        if(context.allOperationsAreFixedTime()) {
-            QSqlQuery sqlUpdateDescription(db);
-            sqlUpdateDescription.prepare("DELETE FROM description WHERE id = :id and name = :n");
-            sqlUpdateDescription.bindValue(":id", simulationIds.back());
-            sqlUpdateDescription.bindValue(":n", Strings::Database::Description::SimulationIncomplete);
-            sqlUpdateDescription.exec();
-        }
-
-        // Commit all the SQL data
-        db.commit();
-
-        context.databaseLock().unlock();*/
-
         delete [] data;
     }
 }
 
 // Initialize the first and second time step of the solution, as the computing the solution at time t requires
 // to know the solution at time t-1 and t-2
-void initialize(double * data, Solution & solution, SimulationContext & context, const vector<ResultPtr> & results)
+void initialize(double * data, Solution & solution, SimulationContext & context, const vector<shared_ptr<SimulationResult>> & results)
 {
     // Alias
     const Settings & settings = context.settings();
@@ -293,7 +230,7 @@ void initialize(double * data, Solution & solution, SimulationContext & context,
 }
 
 // Given the solution of the equation up to the time step solution.timestep - 1, computes the solution at the sime step solution.timestep and increases timestep by one
-void step(double * data, Solution & solution, const SimulationContext & context, const std::vector<ResultPtr> & results)
+void step(double * data, Solution & solution, const SimulationContext & context, const vector<shared_ptr<SimulationResult>> & results)
 {
     // The equation is result = (2-Re dt)^(-1) (2 + Re dt) se + (2-Re dt)^(-1) G s
 
@@ -421,7 +358,7 @@ void step(double * data, Solution & solution, const SimulationContext & context,
     ++solution.timeStep;
 }
 
-void save(double * data, Solution & solution, const Settings & settings, const vector<ResultPtr> & results)
+void save(double * data, Solution & solution, const Settings & settings, const vector<shared_ptr<SimulationResult>> & results)
 {
     // Saving the data if needed
     if(solution.timeStep < static_cast<int>(data[Index::NextSave])) {

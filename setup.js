@@ -29,6 +29,15 @@ function Function(name, code) {
     this.code = code;
 }
 
+function Result() {
+    this.matches = function(name, values) {
+        return this._privateMatches(name, values instanceof Array ? values : [values]);
+    }
+    //this.export = function(filename, options, columns) {}
+    //this.erase = function() {}
+    //this._privateMatches = function(name, values) {}
+}
+
 // Simulation parameters
 /*function Simulation() {
     this.frequency  = "0";

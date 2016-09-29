@@ -63,7 +63,7 @@ public:
     // TODO : is it usefull since data[Index::Timestep] ?
     int timeStep;
 
-    void save(double time, const std::vector<ResultPtr> & results);
+    void save(double time, const std::vector<std::shared_ptr<SimulationResult> > & results);
 
     struct Current {
         void clear();

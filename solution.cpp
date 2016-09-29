@@ -23,35 +23,33 @@ Solution::~Solution()
 {
 }
 
-void Solution::save(double time, const std::vector<ResultPtr> &results)
+void Solution::save(double time, const vector<shared_ptr<SimulationResult>> & results)
 {
     if(results.size() > 1) {
         for(unsigned int i = 0; i < (unsigned int)(results.size()-1); ++i) {
-            lock_guard<mutex> lock(results.at(i)->lock()); (void) lock;
-            vector<double> & values = results[i]->at(time);
+            SimulationResult::lock_type lock(results.at(i)->lock()); (void) lock;
 
-            values[Result::Time]            = time;
-            values[Result::SpinX]           = current.partial(i).spin(0);
-            values[Result::SpinY]           = current.partial(i).spin(1);
-            values[Result::SpinZ]           = current.partial(i).spin(2);
-            values[Result::Contrast]        = current.partial(i).spin.head<3>().norm();
-            values[Result::AtomLossFromF1]  = 0;
-            values[Result::AtomLossFromF2]  = 0;
-            values[Result::Phase]           = current.partial(i).phase;
+            results.at(i)->value(time, SimulationResult::Time)           = time;
+            results.at(i)->value(time, SimulationResult::SpinX)          = current.partial(i).spin(0);
+            results.at(i)->value(time, SimulationResult::SpinY)          = current.partial(i).spin(1);
+            results.at(i)->value(time, SimulationResult::SpinZ)          = current.partial(i).spin(2);
+            results.at(i)->value(time, SimulationResult::Contrast)       = current.partial(i).spin.head<3>().norm();
+            results.at(i)->value(time, SimulationResult::AtomLossFromF1) = 0;
+            results.at(i)->value(time, SimulationResult::AtomLossFromF2) = 0;
+            results.at(i)->value(time, SimulationResult::Phase)          = current.partial(i).phase;
         }
     }
 
-    lock_guard<mutex> lock(results.back()->lock()); (void) lock;
-    vector<double> & values = results.back()->at(time);
+    SimulationResult::lock_type lock(results.back()->lock()); (void) lock;
 
-    values[Result::Time]            = time;
-    values[Result::SpinX]           = current.total.spin(0);
-    values[Result::SpinY]           = current.total.spin(1);
-    values[Result::SpinZ]           = current.total.spin(2);
-    values[Result::Contrast]        = current.total.spin.head<3>().norm();
-    values[Result::AtomLossFromF1]  = current.total.atomLosses(1);
-    values[Result::AtomLossFromF2]  = current.total.atomLosses(2);
-    values[Result::Phase]           = current.total.phase;
+    results.back()->value(time, SimulationResult::Time)           = time;
+    results.back()->value(time, SimulationResult::SpinX)          = current.total.spin(0);
+    results.back()->value(time, SimulationResult::SpinY)          = current.total.spin(1);
+    results.back()->value(time, SimulationResult::SpinZ)          = current.total.spin(2);
+    results.back()->value(time, SimulationResult::Contrast)       = current.total.spin.head<3>().norm();
+    results.back()->value(time, SimulationResult::AtomLossFromF1) = current.total.atomLosses(1);
+    results.back()->value(time, SimulationResult::AtomLossFromF2) = current.total.atomLosses(2);
+    results.back()->value(time, SimulationResult::Phase)          = current.total.phase;
 }
 
 void Solution::clear()
@@ -60,7 +58,6 @@ void Solution::clear()
 
     current.clear();
     previous.clear();
-    //save.clear();
 }
 
 void Solution::Current::clear()

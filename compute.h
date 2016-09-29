@@ -16,13 +16,13 @@ class Result;
 void threadLoop(SimulationContext & context);
 
 // Initial conditions to allow step-by-step solving
-void initialize(double * data, Solution & solution, SimulationContext & context, const std::vector<ResultPtr> &results);
+void initialize(double * data, Solution & solution, SimulationContext & context, const std::vector<std::shared_ptr<SimulationResult>> & results);
 
 // Performs a time step
-void step(double * data, Solution & solution, const SimulationContext & context, const std::vector<ResultPtr> & results);
+void step(double * data, Solution & solution, const SimulationContext & context, const std::vector<std::shared_ptr<SimulationResult>> & results);
 
 // Sate the data if necessary
-void save(double * data, Solution & solution, const ScriptObject::Settings & settings, const std::vector<ResultPtr> & results);
+void save(double * data, Solution & solution, const ScriptObject::Settings & settings, const std::vector<std::shared_ptr<SimulationResult>> & results);
 
 // Computes the phase
 void phase(Solution & solution, const ScriptObject::Settings & settings);
