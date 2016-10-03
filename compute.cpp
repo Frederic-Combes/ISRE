@@ -114,33 +114,25 @@ void initialize(double * data, Solution & solution, SimulationContext & context,
                     1.0;
         }
 
-        // Save the values at the previous timestep
-        solution.previous.total.spin  = solution.current.total.spin;
+        // Values at the first step
+        solution.current.total.spin = accumulate(solution.current.spin.begin(), solution.current.spin.end(), Vector4d::Zero().eval()) / solution.current.spin.size();
+        solution.previous.total.spin = solution.current.total.spin;
+        solution.current.total.phase = atan2(solution.current.total.spin(1), solution.current.total.spin(0));
         solution.previous.total.phase = solution.current.total.phase;
-
-        // Update the current values
-        solution.current.total.spin  = accumulate(solution.current.spin.begin(), solution.current.spin.end(), Vector4d::Zero().eval()) / solution.current.spin.size();
-        solution.current.total.phase = 0;
         solution.current.total.atomLosses(1) = 0;
         solution.current.total.atomLosses(2) = 0;
 
-        // Partial spins
         for(unsigned int i = 0; i < settings.energyBins().size(); ++i) {
-            // Save the values at the previous timestep
-            solution.previous.partial(i).spin  = solution.current.partial(i).spin;
-            solution.previous.partial(i).phase = solution.current.partial(i).phase;
-            // Update the current values
             const Settings::EnergyBin & bin = settings.energyBins().at(i);
-            solution.current.partial(i).spin = accumulate(solution.current.spin.begin() + bin.first,
-                                                          solution.current.spin.begin() + bin.second,
-                                                          Vector4d::Zero().eval()
-                                                          ) / (bin.second - bin.first);
-            solution.current.partial(i).phase = 0;
+            solution.current.partial(i).spin = accumulate(solution.current.spin.begin() + bin.first, solution.current.spin.begin() + bin.second, Vector4d::Zero().eval()) / (bin.second - bin.first);
+            solution.current.partial(i).phase = atan2(solution.current.partial(i).spin(1), solution.current.partial(i).spin(0));
+            solution.previous.partial(i).phase = solution.current.partial(i).phase;
         }
+
+        // Saves the values if necessary
+        save(data, solution, settings, results);
     }
 
-    // Saves the values if necessary
-    save(data, solution, settings, results);
 
     // Values at the first time step
     {
@@ -193,37 +185,30 @@ void initialize(double * data, Solution & solution, SimulationContext & context,
         }
 
         // Save the values at the previous timestep
-        solution.previous.total.spin  = solution.current.total.spin;
+        solution.previous.total.spin = solution.current.total.spin;
         solution.previous.total.phase = solution.current.total.phase;
 
+        for(unsigned int i = 0; i < settings.energyBins().size(); ++i) {
+            solution.previous.partial(i).phase = solution.current.partial(i).phase;
+        }
+
         // Update current values
-        solution.current.total.spin   = accumulate(solution.current.spin.begin(), solution.current.spin.end(), Vector4d::Zero().eval()) / solution.current.spin.size();
-        solution.current.total.phase += asin((   solution.current.total.spin(0) * solution.previous.total.spin(1)
-                                               - solution.previous.total.spin(0) * solution.current.total.spin(1))
-                                             / (solution.current.total.spin.head<2>().norm() * solution.previous.total.spin.head<2>().norm()));
+        solution.current.total.spin = accumulate(solution.current.spin.begin(), solution.current.spin.end(), Vector4d::Zero().eval()) / solution.current.spin.size();
+
         solution.current.total.atomLosses(1) = dt * data[Index::AtomLossFromF1];
         solution.current.total.atomLosses(2) = dt * data[Index::AtomLossFromF2];
 
-        // Partial spins
         for(unsigned int i = 0; i < settings.energyBins().size(); ++i) {
-            // Save the values at the previous timestep
-            solution.previous.partial(i).spin  = solution.current.partial(i).spin;
-            solution.previous.partial(i).phase = solution.current.partial(i).phase;
-            // Update the current values
             const Settings::EnergyBin & bin = settings.energyBins().at(i);
-            solution.current.partial(i).spin = accumulate(solution.current.spin.begin() + bin.first,
-                                                          solution.current.spin.begin() + bin.second,
-                                                          Vector4d::Zero().eval()
-                                                          ) / (bin.second - bin.first);
-            solution.current.partial(i).phase += asin((  solution.current.partial(i).spin(0) * solution.previous.partial(i).spin(1)
-                                                       - solution.previous.partial(i).spin(0) * solution.current.partial(i).spin(1)
-                                                      ) / (solution.current.partial(i).spin.head<2>().norm() * solution.previous.partial(i).spin.head<2>().norm()));
+            solution.current.partial(i).spin = accumulate(solution.current.spin.begin() + bin.first, solution.current.spin.begin() + bin.second, Vector4d::Zero().eval()) / (bin.second - bin.first);
         }
 
-    }
+        // Computes the phase
+        phase(solution, settings);
 
-    // Saves the values if necessary
-    save(data, solution, settings, results);
+        // Saves the values if necessary
+        save(data, solution, settings, results);
+    }
 
     // Next timestep
     solution.timeStep = 2;
@@ -326,8 +311,12 @@ void step(double * data, Solution & solution, const SimulationContext & context,
     }
 
     // Update values at the previous timestep
-    solution.previous.total.spin  = solution.current.total.spin;
+    solution.previous.total.spin = solution.current.total.spin;
     solution.previous.total.phase = solution.current.total.phase;
+
+    for(unsigned int i = 0; i < settings.energyBins().size(); ++i) {
+        solution.previous.partial(i).phase = solution.current.partial(i).phase;
+    }
 
     // Update current values
     solution.current.total.spin = accumulate(solution.current.spin.begin(), solution.current.spin.end(), Vector4d::Zero().eval()) / solution.current.spin.size();
@@ -338,15 +327,8 @@ void step(double * data, Solution & solution, const SimulationContext & context,
 
     // Partial spins
     for(unsigned int i = 0; i < settings.energyBins().size(); ++i) {
-        // Save the values at the previous timestep
-        solution.previous.partial(i).spin  = solution.current.partial(i).spin;
-        solution.previous.partial(i).phase = solution.current.partial(i).phase;
-        // Update the current values
         const Settings::EnergyBin & bin = settings.energyBins().at(i);
-        solution.current.partial(i).spin = accumulate(solution.current.spin.begin() + bin.first,
-                                                      solution.current.spin.begin() + bin.second,
-                                                      Vector4d::Zero().eval()
-                                                      ) / (bin.second - bin.first);
+        solution.current.partial(i).spin = accumulate(solution.current.spin.begin() + bin.first, solution.current.spin.begin() + bin.second, Vector4d::Zero().eval()) / (bin.second - bin.first);
     }
 
     // Computes the phase of the spins
@@ -401,14 +383,14 @@ void applyOperation(const Operation & operation, Solution & solution, const Sett
        spin.head<3>() = operation.matrix * spin.head<3>().eval();
     }
 
-    solution.current.total.spin.head<3>()  = operation.matrix * solution.current.total.spin.head<3>().eval();
+    solution.current.total.spin.head<3>() = operation.matrix * solution.current.total.spin.head<3>().eval();
     solution.previous.total.spin.head<3>() = operation.matrix * solution.previous.total.spin.head<3>().eval();
 
     // Update the phases (set them in the [-pi;+pi] range)
     solution.current.total.phase = atan2(solution.current.total.spin(1), solution.current.total.spin(0));
 
     for(unsigned int i = 0; i < settings.energyBins().size(); ++i) {
-        solution.current.partial(i).spin.head<3>()  = operation.matrix * solution.current.partial(i).spin.head<3>().eval();
+        solution.current.partial(i).spin.head<3>() = operation.matrix * solution.current.partial(i).spin.head<3>().eval();
 
         solution.current.partial(i).phase = atan2(solution.current.partial(i).spin(1), solution.current.partial(i).spin(0));
     }

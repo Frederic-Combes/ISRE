@@ -26,22 +26,22 @@
 #include "result.h"
 
 // Solution of the equation, valid up to the time timestep
-// The class has the following members :
-
-// solution.timestep                    // current timestep
-
-// solution.current.spin(e)             // current spin at energy index e
-// solution.current.total.spin          // total current spin
-// solution.current.total.phase         // current phase
-// solution.current.total.atomLosses(1) // totel current atom losses from the F=1 level
-// solution.current.total.atomLosses(2) // total current atom losses from the F=2 level
-// solution.current.partial(i).spin     // total current spin in the i-th engery bin
-// solution.current.partial(i).phase    // current phase in the i-th energy bin
-
-// solution.previous.total.spin         // total spin at the previous timestep
-// solution.previous.total.phase        // TODO : not needed ?
-// solution.previous.partial(i).spin    // TODO : not needed ?
-// solution.previous.partial(i).phase   // TODO : not needed ?
+/* The class has the following members :
+ *
+ * solution.timestep                    // current timestep
+ *
+ * solution.current.spin(e)             // current spin at energy index e
+ * solution.current.total.spin          // total current spin
+ * solution.current.total.phase         // current phase
+ * solution.current.total.atomLosses(1) // totel current atom losses from the F=1 level
+ * solution.current.total.atomLosses(2) // total current atom losses from the F=2 level
+ * solution.current.partial(i).spin     // total current spin in the i-th engery bin
+ * solution.current.partial(i).phase    // current phase in the i-th energy bin
+ *
+ * solution.previous.total.spin         // total spin at the previous timestep
+ * solution.previous.total.phase        // phase at the previous timestep
+ * solution.previous.partial(i).phase   // phase at the previous timestep in the i-th energy bin
+ **/
 
 class Solution
 {
@@ -111,7 +111,6 @@ public:
         private:
             struct Internal {
                 void clear();
-                alignas(16) Eigen::Vector4d spin;
                 double phase;
             };
             std::vector<Internal> p_internal;

@@ -112,48 +112,5 @@ void Solution::Previous::Partial::clear()
 
 void Solution::Previous::Partial::Internal::clear()
 {
-    spin  = Vector4d::Zero();
     phase = 0;
 }
-
-/*void Solution::Save::clear()
-{
-    p_internal.clear();
-}
-
-unsigned int Solution::Save::Internal::Partial::size() const
-{
-    return p_internal.size();
-}
-
-void Solution::Save::Internal::clear()
-{
-    timestep = 0;
-    total.clear();
-    partial.clear();
-}
-
-void Solution::Save::Internal::Total::clear()
-{
-    spin  = Vector4d::Zero();
-    phase = 0;
-
-    atomLosses.clear();
-}
-
-void Solution::Save::Internal::Total::AtomLosses::clear()
-{
-    p_fromF1 = 0;
-    p_fromF2 = 0;
-}
-
-void Solution::Save::Internal::Partial::clear()
-{
-    for_each(p_internal.begin(), p_internal.end(), [](Internal & internal) {internal.clear();});
-}
-
-void Solution::Save::Internal::Partial::Internal::clear()
-{
-    spin  = Vector4d::Zero();
-    phase = 0;
-}*/
